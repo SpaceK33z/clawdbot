@@ -32,4 +32,8 @@ RUN pnpm ui:build
 
 ENV NODE_ENV=production
 
-CMD ["node", "dist/index.js"]
+VOLUME /root/.clawdbot
+EXPOSE 18789
+
+# Gateway as default; override with docker exec for CLI
+CMD ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
