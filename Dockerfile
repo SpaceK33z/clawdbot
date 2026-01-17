@@ -49,7 +49,7 @@ RUN pnpm ui:install
 RUN pnpm ui:build
 
 # Install Playwright Chromium with system dependencies
-RUN pnpm exec playwright install --with-deps chromium
+RUN npx -y playwright install --with-deps chromium
 
 ENV NODE_ENV=production
 
