@@ -6,30 +6,6 @@ ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable
 
-# Install GitHub CLI (gh)
-RUN mkdir -p -m 755 /etc/apt/keyrings && \
-    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
-    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends gh && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# Install additional tools
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ffmpeg git jq openssh-server && \
-    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# Configure SSH
-RUN mkdir -p /run/sshd && \
-    ssh-keygen -A && \
-    sed -i 's/#PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
-    sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-
 WORKDIR /app
 
 ARG CLAWDBOT_DOCKER_APT_PACKAGES=""
@@ -53,27 +29,7 @@ RUN pnpm build
 ENV CLAWDBOT_PREFER_PNPM=1
 RUN pnpm ui:install
 RUN pnpm ui:build
-RUN printf '#!/bin/sh\nexec node /app/dist/index.js "$@"\n' > /usr/local/bin/clawdbot \
-    && chmod +x /usr/local/bin/clawdbot
-
-# Install Playwright Chromium with system dependencies
-RUN npx -y playwright@latest install --with-deps chromium
 
 ENV NODE_ENV=production
 
-VOLUME /root/.clawdbot
-EXPOSE 18789 22
-
-# Gateway as default; override with docker exec for CLI
-# SSH_PUBLIC_KEY env var: if set, configures authorized_keys and starts sshd
-# CLAWDBOT_GATEWAY_TOKEN is exported to bashrc so SSH sessions can use it
-CMD if [ -n "$SSH_PUBLIC_KEY" ]; then \
-      mkdir -p /root/.ssh && \
-      chmod 700 /root/.ssh && \
-      echo "$SSH_PUBLIC_KEY" > /root/.ssh/authorized_keys && \
-      chmod 600 /root/.ssh/authorized_keys && \
-      echo "CLAWDBOT_GATEWAY_TOKEN=$CLAWDBOT_GATEWAY_TOKEN" >> /etc/environment && \
-      echo "export CLAWDBOT_GATEWAY_TOKEN=$CLAWDBOT_GATEWAY_TOKEN" >> /root/.bashrc && \
-      /usr/sbin/sshd; \
-    fi && \
-    node dist/index.js gateway --bind lan --port 18789 --allow-unconfigured
+CMD ["node", "dist/index.js"]
