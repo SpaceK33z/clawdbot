@@ -452,7 +452,7 @@ describe("createTelegramBot", () => {
       expect(replySpy).toHaveBeenCalledTimes(1);
       const payload = replySpy.mock.calls[0][0];
       expect(payload.Body).toMatch(
-        /^\[Telegram Ada Lovelace \(@ada_bot\) id:1234 2025-01-09T00:00Z\]/,
+        /^\[Telegram Ada Lovelace \(@ada_bot\) id:1234 (\+\d+[smhd] )?2025-01-09T00:00Z\]/,
       );
       expect(payload.Body).toContain("hello world");
     } finally {
@@ -586,7 +586,7 @@ describe("createTelegramBot", () => {
     const payload = replySpy.mock.calls[0][0];
     expectInboundContextContract(payload);
     expect(payload.WasMentioned).toBe(true);
-    expect(payload.Body).toMatch(/^\[Telegram Test Group id:7 2025-01-09T00:00Z\]/);
+    expect(payload.Body).toMatch(/^\[Telegram Test Group id:7 (\+\d+[smhd] )?2025-01-09T00:00Z\]/);
     expect(payload.SenderName).toBe("Ada");
     expect(payload.SenderId).toBe("9");
   });
@@ -628,7 +628,7 @@ describe("createTelegramBot", () => {
     expect(replySpy).toHaveBeenCalledTimes(1);
     const payload = replySpy.mock.calls[0][0];
     expectInboundContextContract(payload);
-    expect(payload.Body).toMatch(/^\[Telegram Ops id:42 2025-01-09T00:00Z\]/);
+    expect(payload.Body).toMatch(/^\[Telegram Ops id:42 (\+\d+[smhd] )?2025-01-09T00:00Z\]/);
     expect(payload.SenderName).toBe("Ada Lovelace");
     expect(payload.SenderId).toBe("99");
     expect(payload.SenderUsername).toBe("ada");
@@ -1157,6 +1157,93 @@ describe("createTelegramBot", () => {
     });
 
     expect(replySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("inherits group allowlist + requireMention in topics", async () => {
+    onSpy.mockReset();
+    const replySpy = replyModule.__replySpy as unknown as ReturnType<typeof vi.fn>;
+    replySpy.mockReset();
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          groupPolicy: "allowlist",
+          groups: {
+            "-1001234567890": {
+              requireMention: false,
+              allowFrom: ["123456789"],
+              topics: {
+                "99": {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
+
+    await handler({
+      message: {
+        chat: {
+          id: -1001234567890,
+          type: "supergroup",
+          title: "Forum Group",
+          is_forum: true,
+        },
+        from: { id: 123456789, username: "testuser" },
+        text: "hello",
+        date: 1736380800,
+        message_thread_id: 99,
+      },
+      me: { username: "clawdbot_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(replySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers topic allowFrom over group allowFrom", async () => {
+    onSpy.mockReset();
+    const replySpy = replyModule.__replySpy as unknown as ReturnType<typeof vi.fn>;
+    replySpy.mockReset();
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          groupPolicy: "allowlist",
+          groups: {
+            "-1001234567890": {
+              allowFrom: ["123456789"],
+              topics: {
+                "99": { allowFrom: ["999999999"] },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
+
+    await handler({
+      message: {
+        chat: {
+          id: -1001234567890,
+          type: "supergroup",
+          title: "Forum Group",
+          is_forum: true,
+        },
+        from: { id: 123456789, username: "testuser" },
+        text: "hello",
+        date: 1736380800,
+        message_thread_id: 99,
+      },
+      me: { username: "clawdbot_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(replySpy).toHaveBeenCalledTimes(0);
   });
 
   it("honors groups default when no explicit group override exists", async () => {

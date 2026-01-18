@@ -33,6 +33,16 @@ vi.mock("../auto-reply/reply.js", () => ({
   getReplyFromConfig: (...args: unknown[]) => replyMock(...args),
 }));
 
+vi.mock("./resolve-channels.js", () => ({
+  resolveSlackChannelAllowlist: async ({ entries }: { entries: string[] }) =>
+    entries.map((input) => ({ input, resolved: false })),
+}));
+
+vi.mock("./resolve-users.js", () => ({
+  resolveSlackUserAllowlist: async ({ entries }: { entries: string[] }) =>
+    entries.map((input) => ({ input, resolved: false })),
+}));
+
 vi.mock("./send.js", () => ({
   sendMessageSlack: (...args: unknown[]) => sendMock(...args),
 }));
@@ -46,6 +56,8 @@ vi.mock("../config/sessions.js", () => ({
   resolveStorePath: vi.fn(() => "/tmp/clawdbot-sessions.json"),
   updateLastRoute: (...args: unknown[]) => updateLastRouteMock(...args),
   resolveSessionKey: vi.fn(),
+  readSessionUpdatedAt: vi.fn(() => undefined),
+  recordSessionMetaFromInbound: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@slack/bolt", () => {
@@ -99,6 +111,7 @@ async function waitForEvent(name: string) {
 
 beforeEach(() => {
   resetInboundDedupe();
+  getSlackHandlers()?.clear();
   config = {
     messages: {
       responsePrefix: "PFX",

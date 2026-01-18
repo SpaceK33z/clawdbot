@@ -8,7 +8,11 @@ import {
   type ResponsePrefixContext,
 } from "../../auto-reply/reply/response-prefix-template.js";
 import { hasControlCommand } from "../../auto-reply/command-detection.js";
-import { formatInboundEnvelope, formatInboundFromLabel } from "../../auto-reply/envelope.js";
+import {
+  formatInboundEnvelope,
+  formatInboundFromLabel,
+  resolveEnvelopeFormatOptions,
+} from "../../auto-reply/envelope.js";
 import {
   createInboundDebouncer,
   resolveInboundDebounceMs,
@@ -20,7 +24,12 @@ import {
 } from "../../auto-reply/reply/history.js";
 import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
-import { resolveStorePath, updateLastRoute } from "../../config/sessions.js";
+import {
+  readSessionUpdatedAt,
+  recordSessionMetaFromInbound,
+  resolveStorePath,
+  updateLastRoute,
+} from "../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../globals.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { mediaKindFromMime } from "../../media/constants.js";
@@ -73,6 +82,23 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       directLabel: entry.senderName,
       directId: entry.senderDisplay,
     });
+    const route = resolveAgentRoute({
+      cfg: deps.cfg,
+      channel: "signal",
+      accountId: deps.accountId,
+      peer: {
+        kind: entry.isGroup ? "group" : "dm",
+        id: entry.isGroup ? (entry.groupId ?? "unknown") : entry.senderPeerId,
+      },
+    });
+    const storePath = resolveStorePath(deps.cfg.session?.store, {
+      agentId: route.agentId,
+    });
+    const envelopeOptions = resolveEnvelopeFormatOptions(deps.cfg);
+    const previousTimestamp = readSessionUpdatedAt({
+      storePath,
+      sessionKey: route.sessionKey,
+    });
     const body = formatInboundEnvelope({
       channel: "Signal",
       from: fromLabel,
@@ -80,6 +106,8 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       body: entry.bodyText,
       chatType: entry.isGroup ? "group" : "direct",
       sender: { name: entry.senderName, id: entry.senderDisplay },
+      previousTimestamp,
+      envelope: envelopeOptions,
     });
     let combinedBody = body;
     const historyKey = entry.isGroup ? String(entry.groupId ?? "unknown") : undefined;
@@ -99,19 +127,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
             }`,
             chatType: "group",
             senderLabel: historyEntry.sender,
+            envelope: envelopeOptions,
           }),
       });
     }
-
-    const route = resolveAgentRoute({
-      cfg: deps.cfg,
-      channel: "signal",
-      accountId: deps.accountId,
-      peer: {
-        kind: entry.isGroup ? "group" : "dm",
-        id: entry.isGroup ? (entry.groupId ?? "unknown") : entry.senderPeerId,
-      },
-    });
     const signalTo = entry.isGroup ? `group:${entry.groupId}` : `signal:${entry.senderRecipient}`;
     const ctxPayload = finalizeInboundContext({
       Body: combinedBody,
@@ -140,11 +159,15 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       OriginatingTo: signalTo,
     });
 
+    void recordSessionMetaFromInbound({
+      storePath,
+      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      ctx: ctxPayload,
+    }).catch((err) => {
+      logVerbose(`signal: failed updating session meta: ${String(err)}`);
+    });
+
     if (!entry.isGroup) {
-      const sessionCfg = deps.cfg.session;
-      const storePath = resolveStorePath(sessionCfg?.store, {
-        agentId: route.agentId,
-      });
       await updateLastRoute({
         storePath,
         sessionKey: route.mainSessionKey,
@@ -153,6 +176,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
           to: entry.senderRecipient,
           accountId: route.accountId,
         },
+        ctx: ctxPayload,
       });
     }
 

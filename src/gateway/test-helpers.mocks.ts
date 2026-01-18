@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { vi } from "vitest";
+import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 
 export type BridgeClientInfo = {
   nodeId: string;
@@ -66,6 +67,7 @@ const hoisted = vi.hoisted(() => ({
     waitCalls: [] as string[],
     waitResults: new Map<string, boolean>(),
   },
+  sendWhatsAppMock: vi.fn().mockResolvedValue({ messageId: "msg-1", toJid: "jid-1" }),
 }));
 
 const testConfigRoot = {
@@ -74,6 +76,7 @@ const testConfigRoot = {
 
 export const setTestConfigRoot = (root: string) => {
   testConfigRoot.value = root;
+  process.env.CLAWDBOT_CONFIG_PATH = path.join(root, "clawdbot.json");
 };
 
 export const bridgeStartCalls = hoisted.bridgeStartCalls;
@@ -89,6 +92,7 @@ export const testState = {
   agentConfig: undefined as Record<string, unknown> | undefined,
   agentsConfig: undefined as Record<string, unknown> | undefined,
   bindingsConfig: undefined as Array<Record<string, unknown>> | undefined,
+  channelsConfig: undefined as Record<string, unknown> | undefined,
   sessionStorePath: undefined as string | undefined,
   sessionConfig: undefined as Record<string, unknown> | undefined,
   allowFrom: undefined as string[] | undefined,
@@ -257,49 +261,63 @@ vi.mock("../config/config.js", async () => {
       config: testState.migrationConfig ?? (raw as Record<string, unknown>),
       changes: testState.migrationChanges,
     }),
-    loadConfig: () => ({
-      agents: (() => {
-        const defaults = {
-          model: "anthropic/claude-opus-4-5",
-          workspace: path.join(os.tmpdir(), "clawd-gateway-test"),
-          ...testState.agentConfig,
-        };
-        if (testState.agentsConfig) {
-          return { ...testState.agentsConfig, defaults };
-        }
-        return { defaults };
-      })(),
-      bindings: testState.bindingsConfig,
-      channels: {
-        whatsapp: {
-          allowFrom: testState.allowFrom,
+    loadConfig: () => {
+      const base = {
+        agents: (() => {
+          const defaults = {
+            model: "anthropic/claude-opus-4-5",
+            workspace: path.join(os.tmpdir(), "clawd-gateway-test"),
+            ...testState.agentConfig,
+          };
+          if (testState.agentsConfig) {
+            return { ...testState.agentsConfig, defaults };
+          }
+          return { defaults };
+        })(),
+        bindings: testState.bindingsConfig,
+        channels: (() => {
+          const baseChannels =
+            testState.channelsConfig && typeof testState.channelsConfig === "object"
+              ? { ...testState.channelsConfig }
+              : {};
+          const existing = baseChannels.whatsapp;
+          const mergedWhatsApp: Record<string, unknown> =
+            existing && typeof existing === "object" && !Array.isArray(existing)
+              ? { ...existing }
+              : {};
+          if (testState.allowFrom !== undefined) {
+            mergedWhatsApp.allowFrom = testState.allowFrom;
+          }
+          baseChannels.whatsapp = mergedWhatsApp;
+          return baseChannels;
+        })(),
+        session: {
+          mainKey: "main",
+          store: testState.sessionStorePath,
+          ...testState.sessionConfig,
         },
-      },
-      session: {
-        mainKey: "main",
-        store: testState.sessionStorePath,
-        ...testState.sessionConfig,
-      },
-      gateway: (() => {
-        const gateway: Record<string, unknown> = {};
-        if (testState.gatewayBind) gateway.bind = testState.gatewayBind;
-        if (testState.gatewayAuth) gateway.auth = testState.gatewayAuth;
-        return Object.keys(gateway).length > 0 ? gateway : undefined;
-      })(),
-      canvasHost: (() => {
-        const canvasHost: Record<string, unknown> = {};
-        if (typeof testState.canvasHostPort === "number")
-          canvasHost.port = testState.canvasHostPort;
-        return Object.keys(canvasHost).length > 0 ? canvasHost : undefined;
-      })(),
-      hooks: testState.hooksConfig,
-      cron: (() => {
-        const cron: Record<string, unknown> = {};
-        if (typeof testState.cronEnabled === "boolean") cron.enabled = testState.cronEnabled;
-        if (typeof testState.cronStorePath === "string") cron.store = testState.cronStorePath;
-        return Object.keys(cron).length > 0 ? cron : undefined;
-      })(),
-    }),
+        gateway: (() => {
+          const gateway: Record<string, unknown> = {};
+          if (testState.gatewayBind) gateway.bind = testState.gatewayBind;
+          if (testState.gatewayAuth) gateway.auth = testState.gatewayAuth;
+          return Object.keys(gateway).length > 0 ? gateway : undefined;
+        })(),
+        canvasHost: (() => {
+          const canvasHost: Record<string, unknown> = {};
+          if (typeof testState.canvasHostPort === "number")
+            canvasHost.port = testState.canvasHostPort;
+          return Object.keys(canvasHost).length > 0 ? canvasHost : undefined;
+        })(),
+        hooks: testState.hooksConfig,
+        cron: (() => {
+          const cron: Record<string, unknown> = {};
+          if (typeof testState.cronEnabled === "boolean") cron.enabled = testState.cronEnabled;
+          if (typeof testState.cronStorePath === "string") cron.store = testState.cronStorePath;
+          return Object.keys(cron).length > 0 ? cron : undefined;
+        })(),
+      } as ReturnType<typeof actual.loadConfig>;
+      return applyPluginAutoEnable({ config: base }).config;
+    },
     parseConfigJson5: (raw: string) => {
       try {
         return { ok: true, parsed: JSON.parse(raw) as unknown };
@@ -342,10 +360,35 @@ vi.mock("../commands/status.js", () => ({
   getStatusSummary: vi.fn().mockResolvedValue({ ok: true }),
 }));
 vi.mock("../web/outbound.js", () => ({
-  sendMessageWhatsApp: vi.fn().mockResolvedValue({ messageId: "msg-1", toJid: "jid-1" }),
+  sendMessageWhatsApp: (...args: unknown[]) =>
+    (hoisted.sendWhatsAppMock as (...args: unknown[]) => unknown)(...args),
+  sendPollWhatsApp: (...args: unknown[]) =>
+    (hoisted.sendWhatsAppMock as (...args: unknown[]) => unknown)(...args),
 }));
+vi.mock("../channels/web/index.js", async () => {
+  const actual = await vi.importActual<typeof import("../channels/web/index.js")>(
+    "../channels/web/index.js",
+  );
+  return {
+    ...actual,
+    sendMessageWhatsApp: (...args: unknown[]) =>
+      (hoisted.sendWhatsAppMock as (...args: unknown[]) => unknown)(...args),
+  };
+});
 vi.mock("../commands/agent.js", () => ({
   agentCommand,
 }));
+vi.mock("../cli/deps.js", async () => {
+  const actual = await vi.importActual<typeof import("../cli/deps.js")>("../cli/deps.js");
+  const base = actual.createDefaultDeps();
+  return {
+    ...actual,
+    createDefaultDeps: () => ({
+      ...base,
+      sendMessageWhatsApp: (...args: unknown[]) =>
+        (hoisted.sendWhatsAppMock as (...args: unknown[]) => unknown)(...args),
+    }),
+  };
+});
 
 process.env.CLAWDBOT_SKIP_CHANNELS = "1";

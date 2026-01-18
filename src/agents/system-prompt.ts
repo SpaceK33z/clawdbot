@@ -109,6 +109,22 @@ function buildMessagingSection(params: {
   ];
 }
 
+function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readToolName: string }) {
+  const docsPath = params.docsPath?.trim();
+  if (!docsPath || params.isMinimal) return [];
+  return [
+    "## Documentation",
+    `Clawdbot docs: ${docsPath}`,
+    "Mirror: https://docs.clawd.bot",
+    "Source: https://github.com/clawdbot/clawdbot",
+    "Community: https://discord.com/invite/clawd",
+    "Find new skills: https://clawdhub.com",
+    "For Clawdbot behavior, commands, config, or architecture: consult local docs first.",
+    "When diagnosing issues, run `clawdbot status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
+    "",
+  ];
+}
+
 export function buildAgentSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
@@ -125,6 +141,7 @@ export function buildAgentSystemPrompt(params: {
   contextFiles?: EmbeddedContextFile[];
   skillsPrompt?: string;
   heartbeatPrompt?: string;
+  docsPath?: string;
   /** Controls which hardcoded sections to include. Defaults to "full". */
   promptMode?: PromptMode;
   runtimeInfo?: {
@@ -183,7 +200,7 @@ export function buildAgentSystemPrompt(params: {
     sessions_send: "Send a message to another session/sub-agent",
     sessions_spawn: "Spawn a sub-agent session",
     session_status:
-      "Show a /status-equivalent status card (usage/cost + Reasoning/Verbose/Elevated); optional per-session model override",
+      "Show a /status-equivalent status card (usage + Reasoning/Verbose/Elevated); optional per-session model override",
     image: "Analyze an image with the configured image model",
   };
 
@@ -295,6 +312,11 @@ export function buildAgentSystemPrompt(params: {
     readToolName,
   });
   const memorySection = buildMemorySection({ isMinimal, availableTools });
+  const docsSection = buildDocsSection({
+    docsPath: params.docsPath,
+    isMinimal,
+    readToolName,
+  });
 
   // For "none" mode, return just the basic identity line
   if (promptMode === "none") {
@@ -371,6 +393,7 @@ export function buildAgentSystemPrompt(params: {
     `Your working directory is: ${params.workspaceDir}`,
     "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.",
     "",
+    ...docsSection,
     params.sandboxInfo?.enabled ? "## Sandbox" : "",
     params.sandboxInfo?.enabled
       ? [
