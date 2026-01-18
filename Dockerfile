@@ -59,21 +59,21 @@ RUN printf '#!/bin/sh\nexec node /app/dist/index.js "$@"\n' > /usr/local/bin/cla
 # Install Playwright Chromium with system dependencies
 RUN npx -y playwright@latest install --with-deps chromium
 
-RUN echo "CLAWDBOT_GATEWAY_TOKEN=${CLAWDBOT_GATEWAY_TOKEN}" >> /etc/environment && \
-    echo "export CLAWDBOT_GATEWAY_TOKEN=${CLAWDBOT_GATEWAY_TOKEN}" >> /root/.bashrc
-
 ENV NODE_ENV=production
 
 VOLUME /root/.clawdbot
 EXPOSE 18789 22
 
 # Gateway as default; override with docker exec for CLI
-# SSH_PUBLIC_KEY env var: if set, configures authorized_keys at startup
+# SSH_PUBLIC_KEY env var: if set, configures authorized_keys and starts sshd
+# CLAWDBOT_GATEWAY_TOKEN is exported to bashrc so SSH sessions can use it
 CMD if [ -n "$SSH_PUBLIC_KEY" ]; then \
       mkdir -p /root/.ssh && \
       chmod 700 /root/.ssh && \
       echo "$SSH_PUBLIC_KEY" > /root/.ssh/authorized_keys && \
       chmod 600 /root/.ssh/authorized_keys && \
+      echo "CLAWDBOT_GATEWAY_TOKEN=$CLAWDBOT_GATEWAY_TOKEN" >> /etc/environment && \
+      echo "export CLAWDBOT_GATEWAY_TOKEN=$CLAWDBOT_GATEWAY_TOKEN" >> /root/.bashrc && \
       /usr/sbin/sshd; \
     fi && \
     node dist/index.js gateway --bind lan --port 18789 --allow-unconfigured
