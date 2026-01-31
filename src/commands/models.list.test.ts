@@ -13,7 +13,6 @@ const resolveProfileUnusableUntilForDisplay = vi.fn().mockReturnValue(null);
 const resolveEnvApiKey = vi.fn().mockReturnValue(undefined);
 const resolveAwsSdkEnvVarName = vi.fn().mockReturnValue(undefined);
 const getCustomProviderApiKey = vi.fn().mockReturnValue(undefined);
-const discoverAuthStorage = vi.fn().mockReturnValue({});
 const discoverModels = vi.fn();
 
 vi.mock("../config/config.js", () => ({
@@ -45,8 +44,22 @@ vi.mock("../agents/model-auth.js", () => ({
 }));
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({
-  discoverAuthStorage,
-  discoverModels,
+  AuthStorage: class {
+    constructor() {}
+  },
+  ModelRegistry: class {
+    getAll() {
+      const result = discoverModels();
+      return result?.getAll?.() ?? [];
+    }
+    getAvailable() {
+      const result = discoverModels();
+      return result?.getAvailable?.() ?? [];
+    }
+    find() {
+      return null;
+    }
+  },
 }));
 
 function makeRuntime() {

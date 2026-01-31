@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({
-  discoverAuthStorage: vi.fn(() => ({ mocked: true })),
-  discoverModels: vi.fn(() => ({ find: vi.fn(() => null) })),
+  AuthStorage: class {
+    constructor() {}
+  },
+  ModelRegistry: class {
+    find() {
+      return null;
+    }
+    getAll() {
+      return [];
+    }
+  },
 }));
 
 import type { OpenClawConfig } from "../../config/config.js";
