@@ -17,14 +17,15 @@ import {
   resolveDefaultTelegramAccountId,
   resolveTelegramAccount,
   resolveTelegramGroupRequireMention,
+  resolveTelegramGroupToolPolicy,
   setAccountEnabledInConfigSection,
   telegramOnboardingAdapter,
   TelegramConfigSchema,
   type ChannelMessageActionAdapter,
   type ChannelPlugin,
-  type ClawdbotConfig,
+  type OpenClawConfig,
   type ResolvedTelegramAccount,
-} from "clawdbot/plugin-sdk";
+} from "openclaw/plugin-sdk";
 
 import { getTelegramRuntime } from "./runtime.js";
 
@@ -154,6 +155,7 @@ export const telegramPlugin: ChannelPlugin<ResolvedTelegramAccount> = {
   },
   groups: {
     resolveRequireMention: resolveTelegramGroupRequireMention,
+    resolveToolPolicy: resolveTelegramGroupToolPolicy,
   },
   threading: {
     resolveReplyToMode: ({ cfg }) => cfg.channels?.telegram?.replyToMode ?? "first",
@@ -249,6 +251,7 @@ export const telegramPlugin: ChannelPlugin<ResolvedTelegramAccount> = {
   outbound: {
     deliveryMode: "direct",
     chunker: (text, limit) => getTelegramRuntime().channel.text.chunkMarkdownText(text, limit),
+    chunkerMode: "markdown",
     textChunkLimit: 4000,
     sendText: async ({ to, text, accountId, deps, replyToId, threadId }) => {
       const send =
@@ -405,7 +408,7 @@ export const telegramPlugin: ChannelPlugin<ResolvedTelegramAccount> = {
     },
     logoutAccount: async ({ accountId, cfg }) => {
       const envToken = process.env.TELEGRAM_BOT_TOKEN?.trim() ?? "";
-      const nextCfg = { ...cfg } as ClawdbotConfig;
+      const nextCfg = { ...cfg } as OpenClawConfig;
       const nextTelegram = cfg.channels?.telegram ? { ...cfg.channels.telegram } : undefined;
       let cleared = false;
       let changed = false;

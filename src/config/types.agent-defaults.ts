@@ -4,6 +4,7 @@ import type {
   HumanDelayConfig,
   TypingMode,
 } from "./types.base.js";
+import type { ChannelId } from "../channels/plugins/types.js";
 import type {
   SandboxBrowserSettings,
   SandboxDockerSettings,
@@ -99,6 +100,8 @@ export type AgentDefaultsConfig = {
   models?: Record<string, AgentModelEntryConfig>;
   /** Agent working directory (preferred). Used as the default cwd for agent runs. */
   workspace?: string;
+  /** Optional repository root for system prompt runtime line (overrides auto-detect). */
+  repoRoot?: string;
   /** Skip bootstrap (BOOTSTRAP.md creation, etc.) for pre-configured deployments. */
   skipBootstrap?: boolean;
   /** Max chars for injected bootstrap files before truncation (default: 20000). */
@@ -134,7 +137,7 @@ export type AgentDefaultsConfig = {
   /** Default verbose level when no /verbose directive is present. */
   verboseDefault?: "off" | "on" | "full";
   /** Default elevated level when no /elevated directive is present. */
-  elevatedDefault?: "off" | "on";
+  elevatedDefault?: "off" | "on" | "ask" | "full";
   /** Default block streaming level when no override is present. */
   blockStreamingDefault?: "off" | "on";
   /**
@@ -173,17 +176,10 @@ export type AgentDefaultsConfig = {
     };
     /** Heartbeat model override (provider/model). */
     model?: string;
-    /** Delivery target (last|whatsapp|telegram|discord|slack|msteams|signal|imessage|none). */
-    target?:
-      | "last"
-      | "whatsapp"
-      | "telegram"
-      | "discord"
-      | "slack"
-      | "msteams"
-      | "signal"
-      | "imessage"
-      | "none";
+    /** Session key for heartbeat runs ("main" or explicit session key). */
+    session?: string;
+    /** Delivery target ("last", "none", or a channel id). */
+    target?: "last" | "none" | ChannelId;
     /** Optional delivery override (E.164 for WhatsApp, chat id for Telegram). */
     to?: string;
     /** Override the heartbeat prompt body (default: "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK."). */
@@ -248,6 +244,8 @@ export type AgentCompactionConfig = {
   mode?: AgentCompactionMode;
   /** Minimum reserve tokens enforced for Pi compaction (0 disables the floor). */
   reserveTokensFloor?: number;
+  /** Max share of context window for history during safeguard pruning (0.1–0.9, default 0.5). */
+  maxHistoryShare?: number;
   /** Pre-compaction memory flush (agentic turn). Default: enabled. */
   memoryFlush?: AgentCompactionMemoryFlushConfig;
 };

@@ -13,7 +13,10 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/gif": ".gif",
   "audio/ogg": ".ogg",
   "audio/mpeg": ".mp3",
+  "audio/x-m4a": ".m4a",
+  "audio/mp4": ".m4a",
   "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
   "application/pdf": ".pdf",
   "application/json": ".json",
   "application/zip": ".zip",
@@ -32,9 +35,11 @@ const EXT_BY_MIME: Record<string, string> = {
   "text/markdown": ".md",
 };
 
-const MIME_BY_EXT: Record<string, string> = Object.fromEntries(
-  Object.entries(EXT_BY_MIME).map(([mime, ext]) => [ext, mime]),
-);
+const MIME_BY_EXT: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(EXT_BY_MIME).map(([mime, ext]) => [ext, mime])),
+  // Additional extension aliases
+  ".jpeg": "image/jpeg",
+};
 
 const AUDIO_FILE_EXTENSIONS = new Set([
   ".aac",

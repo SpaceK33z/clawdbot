@@ -4,7 +4,7 @@ import readline from "node:readline";
 
 import type { NormalizedUsage, UsageLike } from "../agents/usage.js";
 import { normalizeUsage } from "../agents/usage.js";
-import type { ClawdbotConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import {
   resolveSessionFilePath,
@@ -138,7 +138,7 @@ const applyCostTotal = (totals: CostUsageTotals, costTotal: number | undefined) 
 
 async function scanUsageFile(params: {
   filePath: string;
-  config?: ClawdbotConfig;
+  config?: OpenClawConfig;
   onEntry: (entry: ParsedUsageEntry) => void;
 }): Promise<void> {
   const fileStream = fs.createReadStream(params.filePath, { encoding: "utf-8" });
@@ -170,7 +170,7 @@ async function scanUsageFile(params: {
 
 export async function loadCostUsageSummary(params?: {
   days?: number;
-  config?: ClawdbotConfig;
+  config?: OpenClawConfig;
   agentId?: string;
 }): Promise<CostUsageSummary> {
   const days = Math.max(1, Math.floor(params?.days ?? 30));
@@ -184,9 +184,19 @@ export async function loadCostUsageSummary(params?: {
 
   const sessionsDir = resolveSessionTranscriptsDirForAgent(params?.agentId);
   const entries = await fs.promises.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
-  const files = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-    .map((entry) => path.join(sessionsDir, entry.name));
+  const files = (
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+        .map(async (entry) => {
+          const filePath = path.join(sessionsDir, entry.name);
+          const stats = await fs.promises.stat(filePath).catch(() => null);
+          if (!stats) return null;
+          if (stats.mtimeMs < sinceTime) return null;
+          return filePath;
+        }),
+    )
+  ).filter((filePath): filePath is string => Boolean(filePath));
 
   for (const filePath of files) {
     await scanUsageFile({
@@ -223,7 +233,7 @@ export async function loadSessionCostSummary(params: {
   sessionId?: string;
   sessionEntry?: SessionEntry;
   sessionFile?: string;
-  config?: ClawdbotConfig;
+  config?: OpenClawConfig;
 }): Promise<SessionCostSummary | null> {
   const sessionFile =
     params.sessionFile ??

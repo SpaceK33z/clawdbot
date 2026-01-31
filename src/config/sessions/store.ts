@@ -29,9 +29,13 @@ type SessionStoreCacheEntry = {
 const SESSION_STORE_CACHE = new Map<string, SessionStoreCacheEntry>();
 const DEFAULT_SESSION_STORE_TTL_MS = 45_000; // 45 seconds (between 30-60s)
 
+function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function getSessionStoreTtl(): number {
   return resolveCacheTtlMs({
-    envValue: process.env.CLAWDBOT_SESSION_CACHE_TTL_MS,
+    envValue: process.env.OPENCLAW_SESSION_CACHE_TTL_MS,
     defaultTtlMs: DEFAULT_SESSION_STORE_TTL_MS,
   });
 }
@@ -51,7 +55,14 @@ function invalidateSessionStoreCache(storePath: string): void {
 }
 
 function normalizeSessionEntryDelivery(entry: SessionEntry): SessionEntry {
-  const normalized = normalizeSessionDeliveryFields(entry);
+  const normalized = normalizeSessionDeliveryFields({
+    channel: entry.channel,
+    lastChannel: entry.lastChannel,
+    lastTo: entry.lastTo,
+    lastAccountId: entry.lastAccountId,
+    lastThreadId: entry.lastThreadId ?? entry.deliveryContext?.threadId ?? entry.origin?.threadId,
+    deliveryContext: entry.deliveryContext,
+  });
   const nextDelivery = normalized.deliveryContext;
   const sameDelivery =
     (entry.deliveryContext?.channel ?? undefined) === nextDelivery?.channel &&
@@ -115,7 +126,7 @@ export function loadSessionStore(
   try {
     const raw = fs.readFileSync(storePath, "utf-8");
     const parsed = JSON5.parse(raw);
-    if (parsed && typeof parsed === "object") {
+    if (isSessionStoreRecord(parsed)) {
       store = parsed as Record<string, SessionEntry>;
     }
     mtimeMs = getFileMtimeMs(storePath) ?? mtimeMs;

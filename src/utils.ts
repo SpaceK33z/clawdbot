@@ -215,9 +215,16 @@ export function resolveConfigDir(
   env: NodeJS.ProcessEnv = process.env,
   homedir: () => string = os.homedir,
 ): string {
-  const override = env.CLAWDBOT_STATE_DIR?.trim();
+  const override = env.OPENCLAW_STATE_DIR?.trim() || env.CLAWDBOT_STATE_DIR?.trim();
   if (override) return resolveUserPath(override);
-  return path.join(homedir(), ".clawdbot");
+  const newDir = path.join(homedir(), ".openclaw");
+  try {
+    const hasNew = fs.existsSync(newDir);
+    if (hasNew) return newDir;
+  } catch {
+    // best-effort
+  }
+  return newDir;
 }
 
 export function resolveHomeDir(): string | undefined {
@@ -249,6 +256,14 @@ export function shortenHomeInString(input: string): string {
   return input.split(home).join("~");
 }
 
+export function displayPath(input: string): string {
+  return shortenHomePath(input);
+}
+
+export function displayString(input: string): string {
+  return shortenHomeInString(input);
+}
+
 export function formatTerminalLink(
   label: string,
   url: string,
@@ -265,5 +280,5 @@ export function formatTerminalLink(
   return `\u001b]8;;${safeUrl}\u0007${safeLabel}\u001b]8;;\u0007`;
 }
 
-// Configuration root; can be overridden via CLAWDBOT_STATE_DIR.
+// Configuration root; can be overridden via OPENCLAW_STATE_DIR.
 export const CONFIG_DIR = resolveConfigDir();

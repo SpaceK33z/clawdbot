@@ -14,11 +14,24 @@ function cleanCandidate(raw: string) {
   return raw.replace(/^[`"'[{(]+/, "").replace(/[`"'\\})\],]+$/, "");
 }
 
-function isValidMedia(candidate: string) {
+function isValidMedia(candidate: string, opts?: { allowSpaces?: boolean }) {
   if (!candidate) return false;
-  if (candidate.length > 1024) return false;
-  if (/\s/.test(candidate)) return false;
-  return /^https?:\/\//i.test(candidate) || candidate.startsWith("/") || candidate.startsWith("./");
+  if (candidate.length > 4096) return false;
+  if (!opts?.allowSpaces && /\s/.test(candidate)) return false;
+  if (/^https?:\/\//i.test(candidate)) return true;
+
+  // Local paths: only allow safe relative paths starting with ./ that do not traverse upwards.
+  return candidate.startsWith("./") && !candidate.includes("..");
+}
+
+function unwrapQuoted(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return undefined;
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if (first !== last) return undefined;
+  if (first !== `"` && first !== "'" && first !== "`") return undefined;
+  return trimmed.slice(1, -1).trim();
 }
 
 // Check if a character offset is inside any fenced code block
@@ -56,6 +69,13 @@ export function splitMediaFromOutput(raw: string): {
       continue;
     }
 
+    const trimmedStart = line.trimStart();
+    if (!trimmedStart.startsWith("MEDIA:")) {
+      keptLines.push(line);
+      lineOffset += line.length + 1; // +1 for newline
+      continue;
+    }
+
     const matches = Array.from(line.matchAll(MEDIA_TOKEN_RE));
     if (matches.length === 0) {
       keptLines.push(line);
@@ -63,30 +83,74 @@ export function splitMediaFromOutput(raw: string): {
       continue;
     }
 
-    foundMediaToken = true;
     const pieces: string[] = [];
     let cursor = 0;
-    let hasValidMedia = false;
 
     for (const match of matches) {
       const start = match.index ?? 0;
       pieces.push(line.slice(cursor, start));
 
       const payload = match[1];
-      const parts = payload.split(/\s+/).filter(Boolean);
+      const unwrapped = unwrapQuoted(payload);
+      const payloadValue = unwrapped ?? payload;
+      const parts = unwrapped ? [unwrapped] : payload.split(/\s+/).filter(Boolean);
+      const mediaStartIndex = media.length;
+      let validCount = 0;
       const invalidParts: string[] = [];
+      let hasValidMedia = false;
       for (const part of parts) {
         const candidate = normalizeMediaSource(cleanCandidate(part));
-        if (isValidMedia(candidate)) {
+        if (isValidMedia(candidate, unwrapped ? { allowSpaces: true } : undefined)) {
           media.push(candidate);
           hasValidMedia = true;
+          foundMediaToken = true;
+          validCount += 1;
         } else {
           invalidParts.push(part);
         }
       }
 
-      if (hasValidMedia && invalidParts.length > 0) {
-        pieces.push(invalidParts.join(" "));
+      const trimmedPayload = payloadValue.trim();
+      const looksLikeLocalPath =
+        trimmedPayload.startsWith("/") ||
+        trimmedPayload.startsWith("./") ||
+        trimmedPayload.startsWith("../") ||
+        trimmedPayload.startsWith("~") ||
+        trimmedPayload.startsWith("file://");
+      if (
+        !unwrapped &&
+        validCount === 1 &&
+        invalidParts.length > 0 &&
+        /\s/.test(payloadValue) &&
+        looksLikeLocalPath
+      ) {
+        const fallback = normalizeMediaSource(cleanCandidate(payloadValue));
+        if (isValidMedia(fallback, { allowSpaces: true })) {
+          media.splice(mediaStartIndex, media.length - mediaStartIndex, fallback);
+          hasValidMedia = true;
+          foundMediaToken = true;
+          validCount = 1;
+          invalidParts.length = 0;
+        }
+      }
+
+      if (!hasValidMedia) {
+        const fallback = normalizeMediaSource(cleanCandidate(payloadValue));
+        if (isValidMedia(fallback, { allowSpaces: true })) {
+          media.push(fallback);
+          hasValidMedia = true;
+          foundMediaToken = true;
+          invalidParts.length = 0;
+        }
+      }
+
+      if (hasValidMedia) {
+        if (invalidParts.length > 0) {
+          pieces.push(invalidParts.join(" "));
+        }
+      } else {
+        // If no valid media was found in this match, keep the original token text.
+        pieces.push(match[0]);
       }
 
       cursor = start + match[0].length;

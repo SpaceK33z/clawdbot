@@ -9,6 +9,7 @@ import { buildA2UITextJsonl, validateA2UIJsonl } from "./a2ui-jsonl.js";
 import { getNodesTheme, runNodesCommand } from "./cli-utils.js";
 import { callGatewayCli, nodesCallOpts, resolveNodeId } from "./rpc.js";
 import type { NodesRpcOpts } from "./types.js";
+import { shortenHomePath } from "../../utils.js";
 
 async function invokeCanvas(opts: NodesRpcOpts, command: string, params?: Record<string, unknown>) {
   const nodeId = await resolveNodeId(opts, String(opts.node ?? ""));
@@ -85,7 +86,7 @@ export function registerNodesCanvasCommands(nodes: Command) {
             );
             return;
           }
-          defaultRuntime.log(`MEDIA:${filePath}`);
+          defaultRuntime.log(`MEDIA:${shortenHomePath(filePath)}`);
         });
       }),
     { timeoutMs: 60_000 },
@@ -220,7 +221,7 @@ export function registerNodesCanvasCommands(nodes: Command) {
           const { version, messageCount } = validateA2UIJsonl(jsonl);
           if (version === "v0.9") {
             throw new Error(
-              "Detected A2UI v0.9 JSONL (createSurface). Clawdbot currently supports v0.8 only.",
+              "Detected A2UI v0.9 JSONL (createSurface). OpenClaw currently supports v0.8 only.",
             );
           }
           await invokeCanvas(opts, "canvas.a2ui.pushJSONL", { jsonl });

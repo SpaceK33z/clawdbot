@@ -13,9 +13,16 @@ import {
   type BrowserExecutable,
   resolveBrowserExecutableForPlatform,
 } from "./chrome.executables.js";
-import { decorateClawdProfile, isProfileDecorated } from "./chrome.profile-decoration.js";
+import {
+  decorateOpenClawProfile,
+  ensureProfileCleanExit,
+  isProfileDecorated,
+} from "./chrome.profile-decoration.js";
 import type { ResolvedBrowserConfig, ResolvedBrowserProfile } from "./config.js";
-import { DEFAULT_CLAWD_BROWSER_COLOR, DEFAULT_CLAWD_BROWSER_PROFILE_NAME } from "./constants.js";
+import {
+  DEFAULT_OPENCLAW_BROWSER_COLOR,
+  DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME,
+} from "./constants.js";
 
 const log = createSubsystemLogger("browser").child("chrome");
 
@@ -26,7 +33,11 @@ export {
   findChromeExecutableWindows,
   resolveBrowserExecutableForPlatform,
 } from "./chrome.executables.js";
-export { decorateClawdProfile, isProfileDecorated } from "./chrome.profile-decoration.js";
+export {
+  decorateOpenClawProfile,
+  ensureProfileCleanExit,
+  isProfileDecorated,
+} from "./chrome.profile-decoration.js";
 
 function exists(filePath: string) {
   try {
@@ -49,7 +60,7 @@ function resolveBrowserExecutable(resolved: ResolvedBrowserConfig): BrowserExecu
   return resolveBrowserExecutableForPlatform(resolved, process.platform);
 }
 
-export function resolveClawdUserDataDir(profileName = DEFAULT_CLAWD_BROWSER_PROFILE_NAME) {
+export function resolveOpenClawUserDataDir(profileName = DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME) {
   return path.join(CONFIG_DIR, "browser", profileName, "user-data");
 }
 
@@ -142,7 +153,7 @@ export async function isChromeCdpReady(
   return await canOpenWebSocket(wsUrl, handshakeTimeoutMs);
 }
 
-export async function launchClawdChrome(
+export async function launchOpenClawChrome(
   resolved: ResolvedBrowserConfig,
   profile: ResolvedBrowserProfile,
 ): Promise<RunningChrome> {
@@ -158,13 +169,13 @@ export async function launchClawdChrome(
     );
   }
 
-  const userDataDir = resolveClawdUserDataDir(profile.name);
+  const userDataDir = resolveOpenClawUserDataDir(profile.name);
   fs.mkdirSync(userDataDir, { recursive: true });
 
   const needsDecorate = !isProfileDecorated(
     userDataDir,
     profile.name,
-    (profile.color ?? DEFAULT_CLAWD_BROWSER_COLOR).toUpperCase(),
+    (profile.color ?? DEFAULT_OPENCLAW_BROWSER_COLOR).toUpperCase(),
   );
 
   // First launch to create preference files if missing, then decorate and relaunch.
@@ -178,6 +189,8 @@ export async function launchClawdChrome(
       "--disable-background-networking",
       "--disable-component-update",
       "--disable-features=Translate,MediaRouter",
+      "--disable-session-crashed-bubble",
+      "--hide-crash-restore-bubble",
       "--password-store=basic",
     ];
 
@@ -236,14 +249,20 @@ export async function launchClawdChrome(
 
   if (needsDecorate) {
     try {
-      decorateClawdProfile(userDataDir, {
+      decorateOpenClawProfile(userDataDir, {
         name: profile.name,
         color: profile.color,
       });
-      log.info(`🦞 clawd browser profile decorated (${profile.color})`);
+      log.info(`🦞 openclaw browser profile decorated (${profile.color})`);
     } catch (err) {
-      log.warn(`clawd browser profile decoration failed: ${String(err)}`);
+      log.warn(`openclaw browser profile decoration failed: ${String(err)}`);
     }
+  }
+
+  try {
+    ensureProfileCleanExit(userDataDir);
+  } catch (err) {
+    log.warn(`openclaw browser clean-exit prefs failed: ${String(err)}`);
   }
 
   const proc = spawnOnce();
@@ -267,7 +286,7 @@ export async function launchClawdChrome(
 
   const pid = proc.pid ?? -1;
   log.info(
-    `🦞 clawd browser started (${exe.kind}) profile "${profile.name}" on 127.0.0.1:${profile.cdpPort} (pid ${pid})`,
+    `🦞 openclaw browser started (${exe.kind}) profile "${profile.name}" on 127.0.0.1:${profile.cdpPort} (pid ${pid})`,
   );
 
   return {
@@ -280,7 +299,7 @@ export async function launchClawdChrome(
   };
 }
 
-export async function stopClawdChrome(running: RunningChrome, timeoutMs = 2500) {
+export async function stopOpenClawChrome(running: RunningChrome, timeoutMs = 2500) {
   const proc = running.proc;
   if (proc.killed) return;
   try {

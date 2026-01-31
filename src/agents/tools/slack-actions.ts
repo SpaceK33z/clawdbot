@@ -1,6 +1,6 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { resolveSlackAccount } from "../../slack/accounts.js";
 import {
   deleteSlackMessage,
@@ -73,7 +73,7 @@ function resolveThreadTsFromContext(
 
 export async function handleSlackAction(
   params: Record<string, unknown>,
-  cfg: ClawdbotConfig,
+  cfg: OpenClawConfig,
   context?: SlackActionContext,
 ): Promise<AgentToolResult<unknown>> {
   const resolveChannelId = () =>
@@ -214,11 +214,13 @@ export async function handleSlackAction(
           typeof limitRaw === "number" && Number.isFinite(limitRaw) ? limitRaw : undefined;
         const before = readStringParam(params, "before");
         const after = readStringParam(params, "after");
+        const threadId = readStringParam(params, "threadId");
         const result = await readSlackMessages(channelId, {
           ...readOpts,
           limit,
           before: before ?? undefined,
           after: after ?? undefined,
+          threadId: threadId ?? undefined,
         });
         const messages = result.messages.map((message) =>
           withNormalizedTimestamp(

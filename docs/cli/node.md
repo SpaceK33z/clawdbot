@@ -1,13 +1,13 @@
 ---
-summary: "CLI reference for `clawdbot node` (headless node host)"
+summary: "CLI reference for `openclaw node` (headless node host)"
 read_when:
   - Running the headless node host
   - Pairing a non-macOS node for system.run
 ---
 
-# `clawdbot node`
+# `openclaw node`
 
-Run a **headless node host** that connects to the Gateway bridge and exposes
+Run a **headless node host** that connects to the Gateway WebSocket and exposes
 `system.run` / `system.which` on this machine.
 
 ## Why use a node host?
@@ -23,17 +23,35 @@ Common use cases:
 Execution is still guarded by **exec approvals** and per‑agent allowlists on the
 node host, so you can keep command access scoped and explicit.
 
+## Browser proxy (zero-config)
+
+Node hosts automatically advertise a browser proxy if `browser.enabled` is not
+disabled on the node. This lets the agent use browser automation on that node
+without extra configuration.
+
+Disable it on the node if needed:
+
+```json5
+{
+  nodeHost: {
+    browserProxy: {
+      enabled: false
+    }
+  }
+}
+```
+
 ## Run (foreground)
 
 ```bash
-clawdbot node run --host <gateway-host> --port 18790
+openclaw node run --host <gateway-host> --port 18789
 ```
 
 Options:
-- `--host <host>`: Gateway bridge host (default: `127.0.0.1`)
-- `--port <port>`: Gateway bridge port (default: `18790`)
-- `--tls`: Use TLS for the bridge connection
-- `--tls-fingerprint <sha256>`: Pin the bridge certificate fingerprint
+- `--host <host>`: Gateway WebSocket host (default: `127.0.0.1`)
+- `--port <port>`: Gateway WebSocket port (default: `18789`)
+- `--tls`: Use TLS for the gateway connection
+- `--tls-fingerprint <sha256>`: Expected TLS certificate fingerprint (sha256)
 - `--node-id <id>`: Override node id (clears pairing token)
 - `--display-name <name>`: Override the node display name
 
@@ -42,14 +60,14 @@ Options:
 Install a headless node host as a user service.
 
 ```bash
-clawdbot node install --host <gateway-host> --port 18790
+openclaw node install --host <gateway-host> --port 18789
 ```
 
 Options:
-- `--host <host>`: Gateway bridge host (default: `127.0.0.1`)
-- `--port <port>`: Gateway bridge port (default: `18790`)
-- `--tls`: Use TLS for the bridge connection
-- `--tls-fingerprint <sha256>`: Pin the bridge certificate fingerprint
+- `--host <host>`: Gateway WebSocket host (default: `127.0.0.1`)
+- `--port <port>`: Gateway WebSocket port (default: `18789`)
+- `--tls`: Use TLS for the gateway connection
+- `--tls-fingerprint <sha256>`: Expected TLS certificate fingerprint (sha256)
 - `--node-id <id>`: Override node id (clears pairing token)
 - `--display-name <name>`: Override the node display name
 - `--runtime <runtime>`: Service runtime (`node` or `bun`)
@@ -58,12 +76,15 @@ Options:
 Manage the service:
 
 ```bash
-clawdbot node status
-clawdbot node run
-clawdbot node stop
-clawdbot node restart
-clawdbot node uninstall
+openclaw node status
+openclaw node stop
+openclaw node restart
+openclaw node uninstall
 ```
+
+Use `openclaw node run` for a foreground node host (no service).
+
+Service commands accept `--json` for machine-readable output.
 
 ## Pairing
 
@@ -71,16 +92,17 @@ The first connection creates a pending node pair request on the Gateway.
 Approve it via:
 
 ```bash
-clawdbot nodes pending
-clawdbot nodes approve <requestId>
+openclaw nodes pending
+openclaw nodes approve <requestId>
 ```
 
-The node host stores its node id + token in `~/.clawdbot/node.json`.
+The node host stores its node id, token, display name, and gateway connection info in
+`~/.openclaw/node.json`.
 
 ## Exec approvals
 
 `system.run` is gated by local exec approvals:
 
-- `~/.clawdbot/exec-approvals.json`
+- `~/.openclaw/exec-approvals.json`
 - [Exec approvals](/tools/exec-approvals)
-- `clawdbot approvals --node <id|name|ip>` (edit from the Gateway)
+- `openclaw approvals --node <id|name|ip>` (edit from the Gateway)

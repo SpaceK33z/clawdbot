@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { openUrl, resolveBrowserOpenCommand, resolveControlUiLinks } from "./onboard-helpers.js";
+import {
+  normalizeGatewayTokenInput,
+  openUrl,
+  resolveBrowserOpenCommand,
+  resolveControlUiLinks,
+} from "./onboard-helpers.js";
 
 const mocks = vi.hoisted(() => ({
   runCommandWithTimeout: vi.fn(async () => ({
@@ -21,9 +26,17 @@ vi.mock("../infra/tailnet.js", () => ({
   pickPrimaryTailnetIPv4: mocks.pickPrimaryTailnetIPv4,
 }));
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("openUrl", () => {
   it("quotes URLs on win32 so '&' is not treated as cmd separator", async () => {
-    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    vi.stubEnv("VITEST", "");
+    vi.stubEnv("NODE_ENV", "");
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    vi.stubEnv("VITEST", "");
+    vi.stubEnv("NODE_ENV", "development");
 
     const url =
       "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc&response_type=code&redirect_uri=http%3A%2F%2Flocalhost";
@@ -39,15 +52,18 @@ describe("openUrl", () => {
       timeoutMs: 5_000,
       windowsVerbatimArguments: true,
     });
+
+    platformSpy.mockRestore();
   });
 });
 
 describe("resolveBrowserOpenCommand", () => {
   it("marks win32 commands as quoteUrl=true", async () => {
-    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     const resolved = await resolveBrowserOpenCommand();
     expect(resolved.argv).toEqual(["cmd", "/c", "start", ""]);
     expect(resolved.quoteUrl).toBe(true);
+    platformSpy.mockRestore();
   });
 });
 
@@ -90,5 +106,20 @@ describe("resolveControlUiLinks", () => {
     });
     expect(links.httpUrl).toBe("http://127.0.0.1:18789/");
     expect(links.wsUrl).toBe("ws://127.0.0.1:18789");
+  });
+});
+
+describe("normalizeGatewayTokenInput", () => {
+  it("returns empty string for undefined or null", () => {
+    expect(normalizeGatewayTokenInput(undefined)).toBe("");
+    expect(normalizeGatewayTokenInput(null)).toBe("");
+  });
+
+  it("trims string input", () => {
+    expect(normalizeGatewayTokenInput("  token  ")).toBe("token");
+  });
+
+  it("returns empty string for non-string input", () => {
+    expect(normalizeGatewayTokenInput(123)).toBe("");
   });
 });

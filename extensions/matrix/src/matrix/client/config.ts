@@ -1,4 +1,4 @@
-import { MatrixClient } from "matrix-bot-sdk";
+import { MatrixClient } from "@vector-im/matrix-bot-sdk";
 
 import type { CoreConfig } from "../types.js";
 import { getMatrixRuntime } from "../../runtime.js";
@@ -53,7 +53,7 @@ export async function resolveMatrixAuth(params?: {
     saveMatrixCredentials,
     credentialsMatchConfig,
     touchMatrixCredentials,
-  } = await import("./credentials.js");
+  } = await import("../credentials.js");
 
   const cached = loadMatrixCredentials(env);
   const cachedCredentials =
@@ -125,7 +125,7 @@ export async function resolveMatrixAuth(params?: {
       type: "m.login.password",
       identifier: { type: "m.id.user", user: resolved.userId },
       password: resolved.password,
-      initial_device_display_name: resolved.deviceName ?? "Clawdbot Gateway",
+      initial_device_display_name: resolved.deviceName ?? "OpenClaw Gateway",
     }),
   });
 

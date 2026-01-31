@@ -1,7 +1,7 @@
 import { resolveUserTimezone } from "../agents/date-time.js";
 import { normalizeChatType } from "../channels/chat-type.js";
 import { resolveSenderLabel, type SenderLabelParams } from "../channels/sender-label.js";
-import type { ClawdbotConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
 
 export type AgentEnvelopeParams = {
   channel: string;
@@ -16,7 +16,7 @@ export type AgentEnvelopeParams = {
 
 export type EnvelopeFormatOptions = {
   /**
-   * "utc" (default), "local", "user", or an explicit IANA timezone string.
+   * "local" (default), "utc", "user", or an explicit IANA timezone string.
    */
   timezone?: string;
   /**
@@ -45,7 +45,7 @@ type ResolvedEnvelopeTimezone =
   | { mode: "local" }
   | { mode: "iana"; timeZone: string };
 
-export function resolveEnvelopeFormatOptions(cfg?: ClawdbotConfig): EnvelopeFormatOptions {
+export function resolveEnvelopeFormatOptions(cfg?: OpenClawConfig): EnvelopeFormatOptions {
   const defaults = cfg?.agents?.defaults;
   return {
     timezone: defaults?.envelopeTimezone,
@@ -59,7 +59,7 @@ function normalizeEnvelopeOptions(options?: EnvelopeFormatOptions): NormalizedEn
   const includeTimestamp = options?.includeTimestamp !== false;
   const includeElapsed = options?.includeElapsed !== false;
   return {
-    timezone: options?.timezone?.trim() || "utc",
+    timezone: options?.timezone?.trim() || "local",
     includeTimestamp,
     includeElapsed,
     userTimezone: options?.userTimezone,
@@ -77,7 +77,7 @@ function resolveExplicitTimezone(value: string): string | undefined {
 
 function resolveEnvelopeTimezone(options: NormalizedEnvelopeOptions): ResolvedEnvelopeTimezone {
   const trimmed = options.timezone?.trim();
-  if (!trimmed) return { mode: "utc" };
+  if (!trimmed) return { mode: "local" };
   const lowered = trimmed.toLowerCase();
   if (lowered === "utc" || lowered === "gmt") return { mode: "utc" };
   if (lowered === "local" || lowered === "host") return { mode: "local" };

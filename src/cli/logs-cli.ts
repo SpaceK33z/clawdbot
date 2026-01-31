@@ -41,14 +41,16 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 async function fetchLogs(
   opts: LogsCliOptions,
   cursor: number | undefined,
+  showProgress: boolean,
 ): Promise<LogsTailPayload> {
   const limit = parsePositiveInt(opts.limit, 200);
   const maxBytes = parsePositiveInt(opts.maxBytes, 250_000);
-  const payload = await callGatewayFromCli("logs.tail", opts, {
-    cursor,
-    limit,
-    maxBytes,
-  });
+  const payload = await callGatewayFromCli(
+    "logs.tail",
+    opts,
+    { cursor, limit, maxBytes },
+    { progress: showProgress },
+  );
   if (!payload || typeof payload !== "object") {
     throw new Error("Unexpected logs.tail response");
   }
@@ -111,7 +113,7 @@ function createLogWriters() {
     onBrokenPipe: (err, stream) => {
       const code = err.code ?? "EPIPE";
       const target = stream === process.stdout ? "stdout" : "stderr";
-      const message = `clawdbot logs: output ${target} closed (${code}). Stopping tail.`;
+      const message = `openclaw logs: output ${target} closed (${code}). Stopping tail.`;
       try {
         clearActiveProgressLine();
         process.stderr.write(`${message}\n`);
@@ -139,7 +141,7 @@ function emitGatewayError(
 ) {
   const details = buildGatewayConnectionDetails({ url: opts.url });
   const message = "Gateway not reachable. Is it running and accessible?";
-  const hint = `Hint: run \`${formatCliCommand("clawdbot doctor")}\`.`;
+  const hint = `Hint: run \`${formatCliCommand("openclaw doctor")}\`.`;
   const errorText = err instanceof Error ? err.message : String(err);
 
   if (mode === "json") {
@@ -178,7 +180,8 @@ export function registerLogsCli(program: Command) {
     .option("--no-color", "Disable ANSI colors")
     .addHelpText(
       "after",
-      () => `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/logs", "docs.clawd.bot/cli/logs")}\n`,
+      () =>
+        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/logs", "docs.openclaw.ai/cli/logs")}\n`,
     );
 
   addGatewayClientOptions(logs);
@@ -194,8 +197,10 @@ export function registerLogsCli(program: Command) {
 
     while (true) {
       let payload: LogsTailPayload;
+      // Show progress spinner only on first fetch, not during follow polling
+      const showProgress = first && !opts.follow;
       try {
-        payload = await fetchLogs(opts, cursor);
+        payload = await fetchLogs(opts, cursor, showProgress);
       } catch (err) {
         emitGatewayError(err, opts, jsonMode ? "json" : "text", rich, emitJsonLine, errorLine);
         process.exit(1);

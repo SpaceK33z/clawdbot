@@ -2,8 +2,11 @@
 summary: "Heartbeat polling messages and notification rules"
 read_when:
   - Adjusting heartbeat cadence or messaging
+  - Deciding between heartbeat and cron for scheduled tasks
 ---
 # Heartbeat (Gateway)
+
+> **Heartbeat vs Cron?** See [Cron vs Heartbeat](/automation/cron-vs-heartbeat) for guidance on when to use each.
 
 Heartbeat runs **periodic agent turns** in the main session so the model can
 surface anything that needs attention without spamming you.
@@ -59,7 +62,7 @@ stats” or “verify gateway health”), set `agents.defaults.heartbeat.prompt`
 ## Response contract
 
 - If nothing needs attention, reply with **`HEARTBEAT_OK`**.
-- During heartbeat runs, Clawdbot treats `HEARTBEAT_OK` as an ack when it appears
+- During heartbeat runs, OpenClaw treats `HEARTBEAT_OK` as an ack when it appears
   at the **start or end** of the reply. The token is stripped and the reply is
   dropped if the remaining content is **≤ `ackMaxChars`** (default: 300).
 - If `HEARTBEAT_OK` appears in the **middle** of a reply, it is not treated
@@ -79,7 +82,7 @@ and logged; a message that is only `HEARTBEAT_OK` is dropped.
         every: "30m",           // default: 30m (0m disables)
         model: "anthropic/claude-opus-4-5",
         includeReasoning: false, // default: false (deliver separate Reasoning: message when available)
-        target: "last",         // last | whatsapp | telegram | discord | slack | signal | imessage | none
+        target: "last",         // last | none | <channel id> (core or plugin, e.g. "bluebubbles")
         to: "+15551234567",     // optional channel-specific override
         prompt: "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
         ackMaxChars: 300         // max chars allowed after HEARTBEAT_OK
@@ -88,6 +91,14 @@ and logged; a message that is only `HEARTBEAT_OK` is dropped.
   }
 }
 ```
+
+### Scope and precedence
+
+- `agents.defaults.heartbeat` sets global heartbeat behavior.
+- `agents.list[].heartbeat` merges on top; if any agent has a `heartbeat` block, **only those agents** run heartbeats.
+- `channels.defaults.heartbeat` sets visibility defaults for all channels.
+- `channels.<channel>.heartbeat` overrides channel defaults.
+- `channels.<channel>.accounts.<id>.heartbeat` (multi-account channels) overrides per-channel settings.
 
 ### Per-agent heartbeats
 
@@ -127,29 +138,103 @@ Example: two agents, only the second agent runs heartbeats.
 - `every`: heartbeat interval (duration string; default unit = minutes).
 - `model`: optional model override for heartbeat runs (`provider/model`).
 - `includeReasoning`: when enabled, also deliver the separate `Reasoning:` message when available (same shape as `/reasoning on`).
+- `session`: optional session key for heartbeat runs.
+  - `main` (default): agent main session.
+  - Explicit session key (copy from `openclaw sessions --json` or the [sessions CLI](/cli/sessions)).
+  - Session key formats: see [Sessions](/concepts/session) and [Groups](/concepts/groups).
 - `target`:
   - `last` (default): deliver to the last used external channel.
-  - explicit channel: `whatsapp` / `telegram` / `discord` / `slack` / `signal` / `imessage`.
+  - explicit channel: `whatsapp` / `telegram` / `discord` / `googlechat` / `slack` / `msteams` / `signal` / `imessage`.
   - `none`: run the heartbeat but **do not deliver** externally.
-- `to`: optional recipient override (E.164 for WhatsApp, chat id for Telegram, etc.).
+- `to`: optional recipient override (channel-specific id, e.g. E.164 for WhatsApp or a Telegram chat id).
 - `prompt`: overrides the default prompt body (not merged).
 - `ackMaxChars`: max chars allowed after `HEARTBEAT_OK` before delivery.
 
 ## Delivery behavior
 
-- Heartbeats run in each agent’s **main session** (`agent:<id>:<mainKey>`), or `global`
-  when `session.scope = "global"`.
+- Heartbeats run in the agent’s main session by default (`agent:<id>:<mainKey>`),
+  or `global` when `session.scope = "global"`. Set `session` to override to a
+  specific channel session (Discord/WhatsApp/etc.).
+- `session` only affects the run context; delivery is controlled by `target` and `to`.
+- To deliver to a specific channel/recipient, set `target` + `to`. With
+  `target: "last"`, delivery uses the last external channel for that session.
 - If the main queue is busy, the heartbeat is skipped and retried later.
 - If `target` resolves to no external destination, the run still happens but no
   outbound message is sent.
 - Heartbeat-only replies do **not** keep the session alive; the last `updatedAt`
   is restored so idle expiry behaves normally.
 
+## Visibility controls
+
+By default, `HEARTBEAT_OK` acknowledgments are suppressed while alert content is
+delivered. You can adjust this per channel or per account:
+
+```yaml
+channels:
+  defaults:
+    heartbeat:
+      showOk: false      # Hide HEARTBEAT_OK (default)
+      showAlerts: true   # Show alert messages (default)
+      useIndicator: true # Emit indicator events (default)
+  telegram:
+    heartbeat:
+      showOk: true       # Show OK acknowledgments on Telegram
+  whatsapp:
+    accounts:
+      work:
+        heartbeat:
+          showAlerts: false # Suppress alert delivery for this account
+```
+
+Precedence: per-account → per-channel → channel defaults → built-in defaults.
+
+### What each flag does
+
+- `showOk`: sends a `HEARTBEAT_OK` acknowledgment when the model returns an OK-only reply.
+- `showAlerts`: sends the alert content when the model returns a non-OK reply.
+- `useIndicator`: emits indicator events for UI status surfaces.
+
+If **all three** are false, OpenClaw skips the heartbeat run entirely (no model call).
+
+### Per-channel vs per-account examples
+
+```yaml
+channels:
+  defaults:
+    heartbeat:
+      showOk: false
+      showAlerts: true
+      useIndicator: true
+  slack:
+    heartbeat:
+      showOk: true # all Slack accounts
+    accounts:
+      ops:
+        heartbeat:
+          showAlerts: false # suppress alerts for the ops account only
+  telegram:
+    heartbeat:
+      showOk: true
+```
+
+### Common patterns
+
+| Goal | Config |
+| --- | --- |
+| Default behavior (silent OKs, alerts on) | *(no config needed)* |
+| Fully silent (no messages, no indicator) | `channels.defaults.heartbeat: { showOk: false, showAlerts: false, useIndicator: false }` |
+| Indicator-only (no messages) | `channels.defaults.heartbeat: { showOk: false, showAlerts: false, useIndicator: true }` |
+| OKs in one channel only | `channels.telegram.heartbeat: { showOk: true }` |
+
 ## HEARTBEAT.md (optional)
 
 If a `HEARTBEAT.md` file exists in the workspace, the default prompt tells the
 agent to read it. Think of it as your “heartbeat checklist”: small, stable, and
 safe to include every 30 minutes.
+
+If `HEARTBEAT.md` exists but is effectively empty (only blank lines and markdown
+headers like `# Heading`), OpenClaw skips the heartbeat run to save API calls.
+If the file is missing, the heartbeat still runs and the model decides what to do.
 
 Keep it tiny (short checklist or reminders) to avoid prompt bloat.
 
@@ -184,7 +269,7 @@ Safety note: don’t put secrets (API keys, phone numbers, private tokens) into
 You can enqueue a system event and trigger an immediate heartbeat with:
 
 ```bash
-clawdbot wake --text "Check for urgent follow-ups" --mode now
+openclaw system event --text "Check for urgent follow-ups" --mode now
 ```
 
 If multiple agents have `heartbeat` configured, a manual wake runs each of those

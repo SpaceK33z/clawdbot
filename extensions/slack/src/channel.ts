@@ -19,7 +19,9 @@ import {
   readStringParam,
   resolveDefaultSlackAccountId,
   resolveSlackAccount,
+  resolveSlackReplyToMode,
   resolveSlackGroupRequireMention,
+  resolveSlackGroupToolPolicy,
   buildSlackThreadingToolContext,
   setAccountEnabledInConfigSection,
   slackOnboardingAdapter,
@@ -27,7 +29,7 @@ import {
   type ChannelMessageActionName,
   type ChannelPlugin,
   type ResolvedSlackAccount,
-} from "clawdbot/plugin-sdk";
+} from "openclaw/plugin-sdk";
 
 import { getSlackRuntime } from "./runtime.js";
 
@@ -160,10 +162,11 @@ export const slackPlugin: ChannelPlugin<ResolvedSlackAccount> = {
   },
   groups: {
     resolveRequireMention: resolveSlackGroupRequireMention,
+    resolveToolPolicy: resolveSlackGroupToolPolicy,
   },
   threading: {
-    resolveReplyToMode: ({ cfg, accountId }) =>
-      resolveSlackAccount({ cfg, accountId }).replyToMode ?? "off",
+    resolveReplyToMode: ({ cfg, accountId, chatType }) =>
+      resolveSlackReplyToMode(resolveSlackAccount({ cfg, accountId }), chatType),
     allowTagsWhenOff: true,
     buildToolContext: (params) => buildSlackThreadingToolContext(params),
   },

@@ -20,11 +20,12 @@ import {
   resolveDiscordAccount,
   resolveDefaultDiscordAccountId,
   resolveDiscordGroupRequireMention,
+  resolveDiscordGroupToolPolicy,
   setAccountEnabledInConfigSection,
   type ChannelMessageActionAdapter,
   type ChannelPlugin,
   type ResolvedDiscordAccount,
-} from "clawdbot/plugin-sdk";
+} from "openclaw/plugin-sdk";
 
 import { getDiscordRuntime } from "./runtime.js";
 
@@ -144,6 +145,7 @@ export const discordPlugin: ChannelPlugin<ResolvedDiscordAccount> = {
   },
   groups: {
     resolveRequireMention: resolveDiscordGroupRequireMention,
+    resolveToolPolicy: resolveDiscordGroupToolPolicy,
   },
   mentions: {
     stripPatterns: () => ["<@!?\\d+>"],

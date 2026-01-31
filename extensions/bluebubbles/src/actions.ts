@@ -3,15 +3,14 @@ import {
   BLUEBUBBLES_ACTIONS,
   createActionGate,
   jsonResult,
-  readBooleanParam,
   readNumberParam,
   readReactionParams,
   readStringParam,
   type ChannelMessageActionAdapter,
   type ChannelMessageActionName,
   type ChannelToolSend,
-  type ClawdbotConfig,
-} from "clawdbot/plugin-sdk";
+  type OpenClawConfig,
+} from "openclaw/plugin-sdk";
 
 import { resolveBlueBubblesAccount } from "./accounts.js";
 import { resolveBlueBubblesMessageId } from "./monitor.js";
@@ -51,14 +50,25 @@ function readMessageText(params: Record<string, unknown>): string | undefined {
   return readStringParam(params, "text") ?? readStringParam(params, "message");
 }
 
+function readBooleanParam(params: Record<string, unknown>, key: string): boolean | undefined {
+  const raw = params[key];
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed === "true") return true;
+    if (trimmed === "false") return false;
+  }
+  return undefined;
+}
+
 /** Supported action names for BlueBubbles */
 const SUPPORTED_ACTIONS = new Set<ChannelMessageActionName>(BLUEBUBBLES_ACTION_NAMES);
 
 export const bluebubblesMessageActions: ChannelMessageActionAdapter = {
   listActions: ({ cfg }) => {
-    const account = resolveBlueBubblesAccount({ cfg: cfg as ClawdbotConfig });
+    const account = resolveBlueBubblesAccount({ cfg: cfg as OpenClawConfig });
     if (!account.enabled || !account.configured) return [];
-    const gate = createActionGate((cfg as ClawdbotConfig).channels?.bluebubbles?.actions);
+    const gate = createActionGate((cfg as OpenClawConfig).channels?.bluebubbles?.actions);
     const actions = new Set<ChannelMessageActionName>();
     const macOS26 = isMacOS26OrHigher(account.accountId);
     for (const action of BLUEBUBBLES_ACTION_NAMES) {
@@ -80,12 +90,12 @@ export const bluebubblesMessageActions: ChannelMessageActionAdapter = {
   },
   handleAction: async ({ action, params, cfg, accountId, toolContext }) => {
     const account = resolveBlueBubblesAccount({
-      cfg: cfg as ClawdbotConfig,
+      cfg: cfg as OpenClawConfig,
       accountId: accountId ?? undefined,
     });
     const baseUrl = account.config.serverUrl?.trim();
     const password = account.config.password?.trim();
-    const opts = { cfg: cfg as ClawdbotConfig, accountId: accountId ?? undefined };
+    const opts = { cfg: cfg as OpenClawConfig, accountId: accountId ?? undefined };
 
     // Helper to resolve chatGuid from various params or session context
     const resolveChatGuid = async (): Promise<string> => {
@@ -356,6 +366,7 @@ export const bluebubblesMessageActions: ChannelMessageActionAdapter = {
       const caption = readStringParam(params, "caption");
       const contentType =
         readStringParam(params, "contentType") ?? readStringParam(params, "mimeType");
+      const asVoice = readBooleanParam(params, "asVoice");
 
       // Buffer can come from params.buffer (base64) or params.path (file path)
       const base64Buffer = readStringParam(params, "buffer");
@@ -380,6 +391,7 @@ export const bluebubblesMessageActions: ChannelMessageActionAdapter = {
         filename,
         contentType: contentType ?? undefined,
         caption: caption ?? undefined,
+        asVoice: asVoice ?? undefined,
         opts,
       });
 

@@ -1,5 +1,7 @@
+import path from "node:path";
+
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { CHANNEL_IDS } from "../channels/registry.js";
+import { CHANNEL_IDS, normalizeChatChannelId } from "../channels/registry.js";
 import {
   normalizePluginsConfig,
   resolveEnableState,
@@ -10,12 +12,66 @@ import { validateJsonSchemaValue } from "../plugins/schema-validator.js";
 import { findDuplicateAgentDirs, formatDuplicateAgentDirError } from "./agent-dirs.js";
 import { applyAgentDefaults, applyModelDefaults, applySessionDefaults } from "./defaults.js";
 import { findLegacyConfigIssues } from "./legacy.js";
-import type { ClawdbotConfig, ConfigValidationIssue } from "./types.js";
-import { ClawdbotSchema } from "./zod-schema.js";
+import type { OpenClawConfig, ConfigValidationIssue } from "./types.js";
+import { OpenClawSchema } from "./zod-schema.js";
+
+const AVATAR_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+const AVATAR_DATA_RE = /^data:/i;
+const AVATAR_HTTP_RE = /^https?:\/\//i;
+const WINDOWS_ABS_RE = /^[a-zA-Z]:[\\/]/;
+
+function isWorkspaceAvatarPath(value: string, workspaceDir: string): boolean {
+  const workspaceRoot = path.resolve(workspaceDir);
+  const resolved = path.resolve(workspaceRoot, value);
+  const relative = path.relative(workspaceRoot, resolved);
+  if (relative === "") return true;
+  if (relative.startsWith("..")) return false;
+  return !path.isAbsolute(relative);
+}
+
+function validateIdentityAvatar(config: OpenClawConfig): ConfigValidationIssue[] {
+  const agents = config.agents?.list;
+  if (!Array.isArray(agents) || agents.length === 0) return [];
+  const issues: ConfigValidationIssue[] = [];
+  for (const [index, entry] of agents.entries()) {
+    if (!entry || typeof entry !== "object") continue;
+    const avatarRaw = entry.identity?.avatar;
+    if (typeof avatarRaw !== "string") continue;
+    const avatar = avatarRaw.trim();
+    if (!avatar) continue;
+    if (AVATAR_DATA_RE.test(avatar) || AVATAR_HTTP_RE.test(avatar)) continue;
+    if (avatar.startsWith("~")) {
+      issues.push({
+        path: `agents.list.${index}.identity.avatar`,
+        message: "identity.avatar must be a workspace-relative path, http(s) URL, or data URI.",
+      });
+      continue;
+    }
+    const hasScheme = AVATAR_SCHEME_RE.test(avatar);
+    if (hasScheme && !WINDOWS_ABS_RE.test(avatar)) {
+      issues.push({
+        path: `agents.list.${index}.identity.avatar`,
+        message: "identity.avatar must be a workspace-relative path, http(s) URL, or data URI.",
+      });
+      continue;
+    }
+    const workspaceDir = resolveAgentWorkspaceDir(
+      config,
+      entry.id ?? resolveDefaultAgentId(config),
+    );
+    if (!isWorkspaceAvatarPath(avatar, workspaceDir)) {
+      issues.push({
+        path: `agents.list.${index}.identity.avatar`,
+        message: "identity.avatar must stay within the agent workspace.",
+      });
+    }
+  }
+  return issues;
+}
 
 export function validateConfigObject(
   raw: unknown,
-): { ok: true; config: ClawdbotConfig } | { ok: false; issues: ConfigValidationIssue[] } {
+): { ok: true; config: OpenClawConfig } | { ok: false; issues: ConfigValidationIssue[] } {
   const legacyIssues = findLegacyConfigIssues(raw);
   if (legacyIssues.length > 0) {
     return {
@@ -26,7 +82,7 @@ export function validateConfigObject(
       })),
     };
   }
-  const validated = ClawdbotSchema.safeParse(raw);
+  const validated = OpenClawSchema.safeParse(raw);
   if (!validated.success) {
     return {
       ok: false,
@@ -36,7 +92,7 @@ export function validateConfigObject(
       })),
     };
   }
-  const duplicates = findDuplicateAgentDirs(validated.data as ClawdbotConfig);
+  const duplicates = findDuplicateAgentDirs(validated.data as OpenClawConfig);
   if (duplicates.length > 0) {
     return {
       ok: false,
@@ -48,10 +104,14 @@ export function validateConfigObject(
       ],
     };
   }
+  const avatarIssues = validateIdentityAvatar(validated.data as OpenClawConfig);
+  if (avatarIssues.length > 0) {
+    return { ok: false, issues: avatarIssues };
+  }
   return {
     ok: true,
     config: applyModelDefaults(
-      applyAgentDefaults(applySessionDefaults(validated.data as ClawdbotConfig)),
+      applyAgentDefaults(applySessionDefaults(validated.data as OpenClawConfig)),
     ),
   };
 }
@@ -63,7 +123,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function validateConfigObjectWithPlugins(raw: unknown):
   | {
       ok: true;
-      config: ClawdbotConfig;
+      config: OpenClawConfig;
       warnings: ConfigValidationIssue[];
     }
   | {
@@ -163,6 +223,41 @@ export function validateConfigObjectWithPlugins(raw: unknown):
           message: `unknown channel id: ${trimmed}`,
         });
       }
+    }
+  }
+
+  const heartbeatChannelIds = new Set<string>();
+  for (const channelId of CHANNEL_IDS) {
+    heartbeatChannelIds.add(channelId.toLowerCase());
+  }
+  for (const record of registry.plugins) {
+    for (const channelId of record.channels) {
+      const trimmed = channelId.trim();
+      if (trimmed) heartbeatChannelIds.add(trimmed.toLowerCase());
+    }
+  }
+
+  const validateHeartbeatTarget = (target: string | undefined, path: string) => {
+    if (typeof target !== "string") return;
+    const trimmed = target.trim();
+    if (!trimmed) {
+      issues.push({ path, message: "heartbeat target must not be empty" });
+      return;
+    }
+    const normalized = trimmed.toLowerCase();
+    if (normalized === "last" || normalized === "none") return;
+    if (normalizeChatChannelId(trimmed)) return;
+    if (heartbeatChannelIds.has(normalized)) return;
+    issues.push({ path, message: `unknown heartbeat target: ${target}` });
+  };
+
+  validateHeartbeatTarget(
+    config.agents?.defaults?.heartbeat?.target,
+    "agents.defaults.heartbeat.target",
+  );
+  if (Array.isArray(config.agents?.list)) {
+    for (const [index, entry] of config.agents.list.entries()) {
+      validateHeartbeatTarget(entry?.heartbeat?.target, `agents.list.${index}.heartbeat.target`);
     }
   }
 

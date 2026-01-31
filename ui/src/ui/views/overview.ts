@@ -43,13 +43,13 @@ export function renderOverview(props: OverviewProps) {
         <div class="muted" style="margin-top: 8px;">
           This gateway requires auth. Add a token or password, then click Connect.
           <div style="margin-top: 6px;">
-            <span class="mono">clawdbot dashboard --no-open</span> → tokenized URL<br />
-            <span class="mono">clawdbot doctor --generate-gateway-token</span> → set token
+            <span class="mono">openclaw dashboard --no-open</span> → tokenized URL<br />
+            <span class="mono">openclaw doctor --generate-gateway-token</span> → set token
           </div>
           <div style="margin-top: 6px;">
             <a
               class="session-link"
-              href="https://docs.clawd.bot/web/dashboard"
+              href="https://docs.openclaw.ai/web/dashboard"
               target="_blank"
               rel="noreferrer"
               title="Control UI auth docs (opens in new tab)"
@@ -62,16 +62,54 @@ export function renderOverview(props: OverviewProps) {
     return html`
       <div class="muted" style="margin-top: 8px;">
         Auth failed. Re-copy a tokenized URL with
-        <span class="mono">clawdbot dashboard --no-open</span>, or update the token,
+        <span class="mono">openclaw dashboard --no-open</span>, or update the token,
         then click Connect.
         <div style="margin-top: 6px;">
           <a
             class="session-link"
-            href="https://docs.clawd.bot/web/dashboard"
+            href="https://docs.openclaw.ai/web/dashboard"
             target="_blank"
             rel="noreferrer"
             title="Control UI auth docs (opens in new tab)"
             >Docs: Control UI auth</a
+          >
+        </div>
+      </div>
+    `;
+  })();
+  const insecureContextHint = (() => {
+    if (props.connected || !props.lastError) return null;
+    const isSecureContext = typeof window !== "undefined" ? window.isSecureContext : true;
+    if (isSecureContext !== false) return null;
+    const lower = props.lastError.toLowerCase();
+    if (!lower.includes("secure context") && !lower.includes("device identity required")) {
+      return null;
+    }
+    return html`
+      <div class="muted" style="margin-top: 8px;">
+        This page is HTTP, so the browser blocks device identity. Use HTTPS (Tailscale Serve) or
+        open <span class="mono">http://127.0.0.1:18789</span> on the gateway host.
+        <div style="margin-top: 6px;">
+          If you must stay on HTTP, set
+          <span class="mono">gateway.controlUi.allowInsecureAuth: true</span> (token-only).
+        </div>
+        <div style="margin-top: 6px;">
+          <a
+            class="session-link"
+            href="https://docs.openclaw.ai/gateway/tailscale"
+            target="_blank"
+            rel="noreferrer"
+            title="Tailscale Serve docs (opens in new tab)"
+            >Docs: Tailscale Serve</a
+          >
+          <span class="muted"> · </span>
+          <a
+            class="session-link"
+            href="https://docs.openclaw.ai/web/control-ui#insecure-http"
+            target="_blank"
+            rel="noreferrer"
+            title="Insecure HTTP docs (opens in new tab)"
+            >Docs: Insecure HTTP</a
           >
         </div>
       </div>
@@ -103,7 +141,7 @@ export function renderOverview(props: OverviewProps) {
                 const v = (e.target as HTMLInputElement).value;
                 props.onSettingsChange({ ...props.settings, token: v });
               }}
-              placeholder="CLAWDBOT_GATEWAY_TOKEN"
+              placeholder="OPENCLAW_GATEWAY_TOKEN"
             />
           </label>
           <label class="field">
@@ -167,6 +205,7 @@ export function renderOverview(props: OverviewProps) {
           ? html`<div class="callout danger" style="margin-top: 14px;">
               <div>${props.lastError}</div>
               ${authHint ?? ""}
+              ${insecureContextHint ?? ""}
             </div>`
           : html`<div class="callout" style="margin-top: 14px;">
               Use Channels to link WhatsApp, Telegram, Discord, Signal, or iMessage.

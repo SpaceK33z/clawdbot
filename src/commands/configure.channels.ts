@@ -1,16 +1,17 @@
 import { getChannelPlugin, listChannelPlugins } from "../channels/plugins/index.js";
 import { formatCliCommand } from "../cli/command-format.js";
-import type { ClawdbotConfig } from "../config/config.js";
-import { CONFIG_PATH_CLAWDBOT } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { CONFIG_PATH } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { note } from "../terminal/note.js";
+import { shortenHomePath } from "../utils.js";
 import { confirm, select } from "./configure.shared.js";
 import { guardCancel } from "./onboard-helpers.js";
 
 export async function removeChannelConfigWizard(
-  cfg: ClawdbotConfig,
+  cfg: OpenClawConfig,
   runtime: RuntimeEnv,
-): Promise<ClawdbotConfig> {
+): Promise<OpenClawConfig> {
   let next = { ...cfg };
 
   const listConfiguredChannels = () =>
@@ -23,8 +24,8 @@ export async function removeChannelConfigWizard(
     if (configured.length === 0) {
       note(
         [
-          "No channel config found in clawdbot.json.",
-          `Tip: \`${formatCliCommand("clawdbot channels status")}\` shows what is configured and enabled.`,
+          "No channel config found in openclaw.json.",
+          `Tip: \`${formatCliCommand("openclaw channels status")}\` shows what is configured and enabled.`,
         ].join("\n"),
         "Remove channel",
       );
@@ -51,7 +52,7 @@ export async function removeChannelConfigWizard(
     const label = getChannelPlugin(channel)?.meta.label ?? channel;
     const confirmed = guardCancel(
       await confirm({
-        message: `Delete ${label} configuration from ${CONFIG_PATH_CLAWDBOT}?`,
+        message: `Delete ${label} configuration from ${shortenHomePath(CONFIG_PATH)}?`,
         initialValue: false,
       }),
       runtime,
@@ -63,7 +64,7 @@ export async function removeChannelConfigWizard(
     next = {
       ...next,
       channels: Object.keys(nextChannels).length
-        ? (nextChannels as ClawdbotConfig["channels"])
+        ? (nextChannels as OpenClawConfig["channels"])
         : undefined,
     };
 

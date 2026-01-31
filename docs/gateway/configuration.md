@@ -1,13 +1,13 @@
 ---
-summary: "All configuration options for ~/.clawdbot/clawdbot.json with examples"
+summary: "All configuration options for ~/.openclaw/openclaw.json with examples"
 read_when:
   - Adding or modifying config fields
 ---
 # Configuration 🔧
 
-Clawdbot reads an optional **JSON5** config from `~/.clawdbot/clawdbot.json` (comments + trailing commas allowed).
+OpenClaw reads an optional **JSON5** config from `~/.openclaw/openclaw.json` (comments + trailing commas allowed).
 
-If the file is missing, Clawdbot uses safe-ish defaults (embedded Pi agent + per-sender sessions + workspace `~/clawd`). You usually only need a config to:
+If the file is missing, OpenClaw uses safe-ish defaults (embedded Pi agent + per-sender sessions + workspace `~/.openclaw/workspace`). You usually only need a config to:
 - restrict who can trigger the bot (`channels.whatsapp.allowFrom`, `channels.telegram.allowFrom`, etc.)
 - control group allowlists + mention behavior (`channels.whatsapp.groups`, `channels.telegram.groups`, `channels.discord.guilds`, `agents.list[].groupChat`)
 - customize message prefixes (`messages`)
@@ -19,14 +19,14 @@ If the file is missing, Clawdbot uses safe-ish defaults (embedded Pi agent + per
 
 ## Strict config validation
 
-Clawdbot only accepts configurations that fully match the schema.
+OpenClaw only accepts configurations that fully match the schema.
 Unknown keys, malformed types, or invalid values cause the Gateway to **refuse to start** for safety.
 
 When validation fails:
 - The Gateway does not boot.
-- Only diagnostic commands are allowed (for example: `clawdbot doctor`, `clawdbot logs`, `clawdbot health`, `clawdbot status`, `clawdbot gateway status`, `clawdbot gateway probe`, `clawdbot help`).
-- Run `clawdbot doctor` to see the exact issues.
-- Run `clawdbot doctor --fix` (or `--yes`) to apply migrations/repairs.
+- Only diagnostic commands are allowed (for example: `openclaw doctor`, `openclaw logs`, `openclaw health`, `openclaw status`, `openclaw service`, `openclaw help`).
+- Run `openclaw doctor` to see the exact issues.
+- Run `openclaw doctor --fix` (or `--yes`) to apply migrations/repairs.
 
 Doctor never writes changes unless you explicitly opt into `--fix`/`--yes`.
 
@@ -46,18 +46,22 @@ better forms without hard-coding config knowledge.
 Use `config.apply` to validate + write the full config and restart the Gateway in one step.
 It writes a restart sentinel and pings the last active session after the Gateway comes back.
 
+Warning: `config.apply` replaces the **entire config**. If you want to change only a few keys,
+use `config.patch` or `openclaw config set`. Keep a backup of `~/.openclaw/openclaw.json`.
+
 Params:
 - `raw` (string) — JSON5 payload for the entire config
 - `baseHash` (optional) — config hash from `config.get` (required when a config already exists)
 - `sessionKey` (optional) — last active session key for the wake-up ping
+- `note` (optional) — note to include in the restart sentinel
 - `restartDelayMs` (optional) — delay before restart (default 2000)
 
 Example (via `gateway call`):
 
 ```bash
-clawdbot gateway call config.get --params '{}' # capture payload.hash
-clawdbot gateway call config.apply --params '{
-  "raw": "{\\n  agents: { defaults: { workspace: \\"~/clawd\\" } }\\n}\\n",
+openclaw gateway call config.get --params '{}' # capture payload.hash
+openclaw gateway call config.apply --params '{
+  "raw": "{\\n  agents: { defaults: { workspace: \\"~/.openclaw/workspace\\" } }\\n}\\n",
   "baseHash": "<hash-from-config.get>",
   "sessionKey": "agent:main:whatsapp:dm:+15555550123",
   "restartDelayMs": 1000
@@ -71,18 +75,25 @@ unrelated keys. It applies JSON merge patch semantics:
 - objects merge recursively
 - `null` deletes a key
 - arrays replace
+Like `config.apply`, it validates, writes the config, stores a restart sentinel, and schedules
+the Gateway restart (with an optional wake when `sessionKey` is provided).
 
 Params:
 - `raw` (string) — JSON5 payload containing just the keys to change
 - `baseHash` (required) — config hash from `config.get`
+- `sessionKey` (optional) — last active session key for the wake-up ping
+- `note` (optional) — note to include in the restart sentinel
+- `restartDelayMs` (optional) — delay before restart (default 2000)
 
 Example:
 
 ```bash
-clawdbot gateway call config.get --params '{}' # capture payload.hash
-clawdbot gateway call config.patch --params '{
+openclaw gateway call config.get --params '{}' # capture payload.hash
+openclaw gateway call config.patch --params '{
   "raw": "{\\n  channels: { telegram: { groups: { \\"*\\": { requireMention: false } } } }\\n}\\n",
-  "baseHash": "<hash-from-config.get>"
+  "baseHash": "<hash-from-config.get>",
+  "sessionKey": "agent:main:whatsapp:dm:+15555550123",
+  "restartDelayMs": 1000
 }'
 ```
 
@@ -90,7 +101,7 @@ clawdbot gateway call config.patch --params '{
 
 ```json5
 {
-  agents: { defaults: { workspace: "~/clawd" } },
+  agents: { defaults: { workspace: "~/.openclaw/workspace" } },
   channels: { whatsapp: { allowFrom: ["+15555550123"] } }
 }
 ```
@@ -107,11 +118,11 @@ To prevent the bot from responding to WhatsApp @-mentions in groups (only respon
 ```json5
 {
   agents: {
-    defaults: { workspace: "~/clawd" },
+    defaults: { workspace: "~/.openclaw/workspace" },
     list: [
       {
         id: "main",
-        groupChat: { mentionPatterns: ["@clawd", "reisponde"] }
+        groupChat: { mentionPatterns: ["@openclaw", "reisponde"] }
       }
     ]
   },
@@ -135,7 +146,7 @@ Split your config into multiple files using the `$include` directive. This is us
 ### Basic usage
 
 ```json5
-// ~/.clawdbot/clawdbot.json
+// ~/.openclaw/openclaw.json
 {
   gateway: { port: 18789 },
   
@@ -153,11 +164,11 @@ Split your config into multiple files using the `$include` directive. This is us
 ```
 
 ```json5
-// ~/.clawdbot/agents.json5
+// ~/.openclaw/agents.json5
 {
   defaults: { sandbox: { mode: "all", scope: "session" } },
   list: [
-    { id: "main", workspace: "~/clawd" }
+    { id: "main", workspace: "~/.openclaw/workspace" }
   ]
 }
 ```
@@ -197,7 +208,7 @@ Included files can themselves contain `$include` directives (up to 10 levels dee
 
 ```json5
 { "$include": "./sub/config.json5" }      // relative
-{ "$include": "/etc/clawdbot/base.json5" } // absolute
+{ "$include": "/etc/openclaw/base.json5" } // absolute
 { "$include": "../shared/common.json5" }   // parent dir
 ```
 
@@ -210,7 +221,7 @@ Included files can themselves contain `$include` directives (up to 10 levels dee
 ### Example: Multi-client legal setup
 
 ```json5
-// ~/.clawdbot/clawdbot.json
+// ~/.openclaw/openclaw.json
 {
   gateway: { port: 18789, auth: { token: "secret" } },
   
@@ -237,7 +248,7 @@ Included files can themselves contain `$include` directives (up to 10 levels dee
 ```
 
 ```json5
-// ~/.clawdbot/clients/mueller/agents.json5
+// ~/.openclaw/clients/mueller/agents.json5
 [
   { id: "mueller-transcribe", workspace: "~/clients/mueller/transcribe" },
   { id: "mueller-docs", workspace: "~/clients/mueller/docs" }
@@ -245,7 +256,7 @@ Included files can themselves contain `$include` directives (up to 10 levels dee
 ```
 
 ```json5
-// ~/.clawdbot/clients/mueller/broadcast.json5
+// ~/.openclaw/clients/mueller/broadcast.json5
 {
   "120363403215116621@g.us": ["mueller-transcribe", "mueller-docs"]
 }
@@ -255,11 +266,11 @@ Included files can themselves contain `$include` directives (up to 10 levels dee
 
 ### Env vars + `.env`
 
-Clawdbot reads env vars from the parent process (shell, launchd/systemd, CI, etc.).
+OpenClaw reads env vars from the parent process (shell, launchd/systemd, CI, etc.).
 
 Additionally, it loads:
 - `.env` from the current working directory (if present)
-- a global fallback `.env` from `~/.clawdbot/.env` (aka `$CLAWDBOT_STATE_DIR/.env`)
+- a global fallback `.env` from `~/.openclaw/.env` (aka `$OPENCLAW_STATE_DIR/.env`)
 
 Neither `.env` file overrides existing env vars.
 
@@ -281,7 +292,7 @@ See [/environment](/environment) for full precedence and sources.
 
 ### `env.shellEnv` (optional)
 
-Opt-in convenience: if enabled and none of the expected keys are set yet, Clawdbot runs your login shell and imports only the missing expected keys (never overrides).
+Opt-in convenience: if enabled and none of the expected keys are set yet, OpenClaw runs your login shell and imports only the missing expected keys (never overrides).
 This effectively sources your shell profile.
 
 ```json5
@@ -296,8 +307,8 @@ This effectively sources your shell profile.
 ```
 
 Env var equivalent:
-- `CLAWDBOT_LOAD_SHELL_ENV=1`
-- `CLAWDBOT_SHELL_ENV_TIMEOUT_MS=15000`
+- `OPENCLAW_LOAD_SHELL_ENV=1`
+- `OPENCLAW_SHELL_ENV_TIMEOUT_MS=15000`
 
 ### Env var substitution in config
 
@@ -315,7 +326,7 @@ You can reference environment variables directly in any config string value usin
   },
   gateway: {
     auth: {
-      token: "${CLAWDBOT_GATEWAY_TOKEN}"
+      token: "${OPENCLAW_GATEWAY_TOKEN}"
     }
   }
 }
@@ -343,31 +354,25 @@ You can reference environment variables directly in any config string value usin
 
 ### Auth storage (OAuth + API keys)
 
-Clawdbot stores **per-agent** auth profiles (OAuth + API keys) in:
-- `<agentDir>/auth-profiles.json` (default: `~/.clawdbot/agents/<agentId>/agent/auth-profiles.json`)
+OpenClaw stores **per-agent** auth profiles (OAuth + API keys) in:
+- `<agentDir>/auth-profiles.json` (default: `~/.openclaw/agents/<agentId>/agent/auth-profiles.json`)
 
 See also: [/concepts/oauth](/concepts/oauth)
 
 Legacy OAuth imports:
-- `~/.clawdbot/credentials/oauth.json` (or `$CLAWDBOT_STATE_DIR/credentials/oauth.json`)
+- `~/.openclaw/credentials/oauth.json` (or `$OPENCLAW_STATE_DIR/credentials/oauth.json`)
 
 The embedded Pi agent maintains a runtime cache at:
 - `<agentDir>/auth.json` (managed automatically; don’t edit manually)
 
 Legacy agent dir (pre multi-agent):
-- `~/.clawdbot/agent/*` (migrated by `clawdbot doctor` into `~/.clawdbot/agents/<defaultAgentId>/agent/*`)
+- `~/.openclaw/agent/*` (migrated by `openclaw doctor` into `~/.openclaw/agents/<defaultAgentId>/agent/*`)
 
 Overrides:
-- OAuth dir (legacy import only): `CLAWDBOT_OAUTH_DIR`
-- Agent dir (default agent root override): `CLAWDBOT_AGENT_DIR` (preferred), `PI_CODING_AGENT_DIR` (legacy)
+- OAuth dir (legacy import only): `OPENCLAW_OAUTH_DIR`
+- Agent dir (default agent root override): `OPENCLAW_AGENT_DIR` (preferred), `PI_CODING_AGENT_DIR` (legacy)
 
-On first use, Clawdbot imports `oauth.json` entries into `auth-profiles.json`.
-
-Clawdbot also auto-syncs OAuth tokens from external CLIs into `auth-profiles.json` (when present on the gateway host):
-- Claude Code → `anthropic:claude-cli`
-  - macOS: Keychain item "Claude Code-credentials" (choose "Always Allow" to avoid launchd prompts)
-  - Linux/Windows: `~/.claude/.credentials.json`
-- `~/.codex/auth.json` (Codex CLI) → `openai-codex:codex-cli`
+On first use, OpenClaw imports `oauth.json` entries into `auth-profiles.json`.
 
 ### `auth`
 
@@ -389,23 +394,33 @@ rotation order used for failover.
 }
 ```
 
-Note: `anthropic:claude-cli` should use `mode: "oauth"` even when the stored
-credential is a setup-token. Clawdbot auto-migrates older configs that used
-`mode: "token"`.
-
 ### `agents.list[].identity`
 
 Optional per-agent identity used for defaults and UX. This is written by the macOS onboarding assistant.
 
-If set, Clawdbot derives defaults (only when you haven’t set them explicitly):
+If set, OpenClaw derives defaults (only when you haven’t set them explicitly):
 - `messages.ackReaction` from the **active agent**’s `identity.emoji` (falls back to 👀)
-- `agents.list[].groupChat.mentionPatterns` from the agent’s `identity.name`/`identity.emoji` (so “@Samantha” works in groups across Telegram/Slack/Discord/iMessage/WhatsApp)
+- `agents.list[].groupChat.mentionPatterns` from the agent’s `identity.name`/`identity.emoji` (so “@Samantha” works in groups across Telegram/Slack/Discord/Google Chat/iMessage/WhatsApp)
+- `identity.avatar` accepts a workspace-relative image path or a remote URL/data URL. Local files must live inside the agent workspace.
+
+`identity.avatar` accepts:
+- Workspace-relative path (must stay within the agent workspace)
+- `http(s)` URL
+- `data:` URI
 
 ```json5
 {
   agents: {
     list: [
-      { id: "main", identity: { name: "Samantha", theme: "helpful sloth", emoji: "🦥" } }
+      {
+        id: "main",
+        identity: {
+          name: "Samantha",
+          theme: "helpful sloth",
+          emoji: "🦥",
+          avatar: "avatars/samantha.png"
+        }
+      }
     ]
   }
 }
@@ -429,8 +444,8 @@ Metadata written by CLI wizards (`onboard`, `configure`, `doctor`).
 
 ### `logging`
 
-- Default log file: `/tmp/clawdbot/clawdbot-YYYY-MM-DD.log`
-- If you want a stable path, set `logging.file` to `/tmp/clawdbot/clawdbot.log`.
+- Default log file: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
+- If you want a stable path, set `logging.file` to `/tmp/openclaw/openclaw.log`.
 - Console output can be tuned separately via:
   - `logging.consoleLevel` (defaults to `info`, bumps to `debug` when `--verbose`)
   - `logging.consoleStyle` (`pretty` | `compact` | `json`)
@@ -442,7 +457,7 @@ Metadata written by CLI wizards (`onboard`, `configure`, `doctor`).
 {
   logging: {
     level: "info",
-    file: "/tmp/clawdbot/clawdbot.log",
+    file: "/tmp/openclaw/openclaw.log",
     consoleLevel: "info",
     consoleStyle: "pretty",
     redactSensitive: "tools",
@@ -466,8 +481,8 @@ Controls how WhatsApp direct chats (DMs) are handled:
 Pairing codes expire after 1 hour; the bot only sends a pairing code when a new request is created. Pending DM pairing requests are capped at **3 per channel** by default.
 
 Pairing approvals:
-- `clawdbot pairing list whatsapp`
-- `clawdbot pairing approve whatsapp <code>`
+- `openclaw pairing list whatsapp`
+- `openclaw pairing approve whatsapp <code>`
 
 ### `channels.whatsapp.allowFrom`
 
@@ -482,6 +497,7 @@ For groups, use `channels.whatsapp.groupPolicy` + `channels.whatsapp.groupAllowF
       dmPolicy: "pairing", // pairing | allowlist | open | disabled
       allowFrom: ["+15555550123", "+447700900123"],
       textChunkLimit: 4000, // optional outbound chunk size (chars)
+      chunkMode: "length", // optional chunking mode (length | newline)
       mediaMaxMb: 50 // optional inbound media cap (MB)
     }
   }
@@ -516,8 +532,8 @@ Run multiple WhatsApp accounts in one gateway:
         default: {}, // optional; keeps the default id stable
         personal: {},
         biz: {
-          // Optional override. Default: ~/.clawdbot/credentials/whatsapp/biz
-          // authDir: "~/.clawdbot/credentials/whatsapp/biz",
+          // Optional override. Default: ~/.openclaw/credentials/whatsapp/biz
+          // authDir: "~/.openclaw/credentials/whatsapp/biz",
         }
       }
     }
@@ -527,9 +543,9 @@ Run multiple WhatsApp accounts in one gateway:
 
 Notes:
 - Outbound commands default to account `default` if present; otherwise the first configured account id (sorted).
-- The legacy single-account Baileys auth dir is migrated by `clawdbot doctor` into `whatsapp/default`.
+- The legacy single-account Baileys auth dir is migrated by `openclaw doctor` into `whatsapp/default`.
 
-### `channels.telegram.accounts` / `channels.discord.accounts` / `channels.slack.accounts` / `channels.signal.accounts` / `channels.imessage.accounts`
+### `channels.telegram.accounts` / `channels.discord.accounts` / `channels.googlechat.accounts` / `channels.slack.accounts` / `channels.mattermost.accounts` / `channels.signal.accounts` / `channels.imessage.accounts`
 
 Run multiple accounts per channel (each account has its own `accountId` and optional `name`):
 
@@ -560,7 +576,7 @@ Notes:
 
 ### Group chat mention gating (`agents.list[].groupChat` + `messages.groupChat`)
 
-Group messages default to **require mention** (either metadata mention or regex patterns). Applies to WhatsApp, Telegram, Discord, and iMessage group chats.
+Group messages default to **require mention** (either metadata mention or regex patterns). Applies to WhatsApp, Telegram, Discord, Google Chat, and iMessage group chats.
 
 **Mention types:**
 - **Metadata mentions**: Native platform @-mentions (e.g., WhatsApp tap-to-mention). Ignored in WhatsApp self-chat mode (see `channels.whatsapp.allowFrom`).
@@ -574,7 +590,7 @@ Group messages default to **require mention** (either metadata mention or regex 
   },
   agents: {
     list: [
-      { id: "main", groupChat: { mentionPatterns: ["@clawd", "clawdbot", "clawd"] } }
+      { id: "main", groupChat: { mentionPatterns: ["@openclaw", "openclaw"] } }
     ]
   }
 }
@@ -636,7 +652,7 @@ To respond **only** to specific text triggers (ignoring native @-mentions):
         id: "main",
         groupChat: {
           // Only these text patterns will trigger responses
-          mentionPatterns: ["reisponde", "@clawd"]
+          mentionPatterns: ["reisponde", "@openclaw"]
         }
       }
     ]
@@ -707,8 +723,8 @@ Inbound messages are routed to an agent via bindings.
   - `default`: optional; when multiple are set, the first wins and a warning is logged.
     If none are set, the **first entry** in the list is the default agent.
   - `name`: display name for the agent.
-  - `workspace`: default `~/clawd-<agentId>` (for `main`, falls back to `agents.defaults.workspace`).
-  - `agentDir`: default `~/.clawdbot/agents/<agentId>/agent`.
+  - `workspace`: default `~/.openclaw/workspace-<agentId>` (for `main`, falls back to `agents.defaults.workspace`).
+  - `agentDir`: default `~/.openclaw/agents/<agentId>/agent`.
   - `model`: per-agent default model, overrides `agents.defaults.model` for that agent.
     - string form: `"provider/model"`, overrides only `agents.defaults.model.primary`
     - object form: `{ primary, fallbacks }` (fallbacks override `agents.defaults.model.fallbacks`; `[]` disables global fallbacks for that agent)
@@ -763,7 +779,7 @@ Full access (no sandbox):
     list: [
       {
         id: "personal",
-        workspace: "~/clawd-personal",
+        workspace: "~/.openclaw/workspace-personal",
         sandbox: { mode: "off" }
       }
     ]
@@ -778,7 +794,7 @@ Read-only tools + read-only workspace:
     list: [
       {
         id: "family",
-        workspace: "~/clawd-family",
+        workspace: "~/.openclaw/workspace-family",
         sandbox: {
           mode: "all",
           scope: "agent",
@@ -801,7 +817,7 @@ No filesystem access (messaging/session tools enabled):
     list: [
       {
         id: "public",
-        workspace: "~/clawd-public",
+        workspace: "~/.openclaw/workspace-public",
         sandbox: {
           mode: "all",
           scope: "agent",
@@ -823,8 +839,8 @@ Example: two WhatsApp accounts → two agents:
 {
   agents: {
     list: [
-      { id: "home", default: true, workspace: "~/clawd-home" },
-      { id: "work", workspace: "~/clawd-work" }
+      { id: "home", default: true, workspace: "~/.openclaw/workspace-home" },
+      { id: "work", workspace: "~/.openclaw/workspace-work" }
     ]
   },
   bindings: [
@@ -933,11 +949,13 @@ Notes:
 - `channels.telegram.customCommands` adds extra Telegram bot menu entries. Names are normalized; conflicts with native commands are ignored.
 - `commands.bash: true` enables `! <cmd>` to run host shell commands (`/bash <cmd>` also works as an alias). Requires `tools.elevated.enabled` and allowlisting the sender in `tools.elevated.allowFrom.<channel>`.
 - `commands.bashForegroundMs` controls how long bash waits before backgrounding. While a bash job is running, new `! <cmd>` requests are rejected (one at a time).
-- `commands.config: true` enables `/config` (reads/writes `clawdbot.json`).
+- `commands.config: true` enables `/config` (reads/writes `openclaw.json`).
 - `channels.<provider>.configWrites` gates config mutations initiated by that channel (default: true). This applies to `/config set|unset` plus provider-specific auto-migrations (Telegram supergroup ID changes, Slack channel ID changes).
 - `commands.debug: true` enables `/debug` (runtime-only overrides).
 - `commands.restart: true` enables `/restart` and the gateway tool restart action.
 - `commands.useAccessGroups: false` allows commands to bypass access-group allowlists/policies.
+- Slash commands and directives are only honored for **authorized senders**. Authorization is derived from
+  channel allowlists/pairing plus `commands.useAccessGroups`.
 
 ### `web` (WhatsApp web channel runtime)
 
@@ -962,7 +980,7 @@ Set `web.enabled: false` to keep it off by default.
 
 ### `channels.telegram` (bot transport)
 
-Clawdbot starts Telegram only when a `channels.telegram` config section exists. The bot token is resolved from `channels.telegram.botToken` (or `channels.telegram.tokenFile`), with `TELEGRAM_BOT_TOKEN` as a fallback for the default account.
+OpenClaw starts Telegram only when a `channels.telegram` config section exists. The bot token is resolved from `channels.telegram.botToken` (or `channels.telegram.tokenFile`), with `TELEGRAM_BOT_TOKEN` as a fallback for the default account.
 Set `channels.telegram.enabled: false` to disable automatic startup.
 Multi-account support lives under `channels.telegram.accounts` (see the multi-account section above). Env tokens only apply to the default account.
 Set `channels.telegram.configWrites: false` to block Telegram-initiated config writes (including supergroup ID migrations and `/config set|unset`).
@@ -995,6 +1013,7 @@ Set `channels.telegram.configWrites: false` to block Telegram-initiated config w
       ],
       historyLimit: 50,                     // include last N group messages as context (0 disables)
       replyToMode: "first",                 // off | first | all
+      linkPreview: true,                   // toggle outbound link previews
       streamMode: "partial",               // off | partial | block (draft streaming; separate from block streaming)
       draftChunk: {                        // optional; only for streamMode=block
         minChars: 200,
@@ -1009,6 +1028,9 @@ Set `channels.telegram.configWrites: false` to block Telegram-initiated config w
         minDelayMs: 400,
         maxDelayMs: 30000,
         jitter: 0.1
+      },
+      network: {                           // transport overrides
+        autoSelectFamily: false
       },
       proxy: "socks5://localhost:9050",
       webhookUrl: "https://example.com/telegram-webhook",
@@ -1061,11 +1083,11 @@ Multi-account support lives under `channels.discord.accounts` (see the multi-acc
         policy: "pairing",                    // pairing | allowlist | open | disabled
         allowFrom: ["1234567890", "steipete"], // optional DM allowlist ("open" requires ["*"])
         groupEnabled: false,                 // enable group DMs
-        groupChannels: ["clawd-dm"]          // optional group DM allowlist
+        groupChannels: ["openclaw-dm"]          // optional group DM allowlist
       },
       guilds: {
         "123456789012345678": {               // guild id (preferred) or slug
-          slug: "friends-of-clawd",
+          slug: "friends-of-openclaw",
           requireMention: false,              // per-guild default
           reactionNotifications: "own",       // off | own | all | allowlist
           users: ["987654321098765432"],      // optional per-guild user allowlist
@@ -1083,6 +1105,7 @@ Multi-account support lives under `channels.discord.accounts` (see the multi-acc
       },
       historyLimit: 20,                       // include last N guild messages as context
       textChunkLimit: 2000,                   // optional outbound text chunk size (chars)
+      chunkMode: "length",                    // optional chunking mode (length | newline)
       maxLinesPerMessage: 17,                 // soft max lines per message (Discord UI clipping)
       retry: {                                // outbound retry policy
         attempts: 3,
@@ -1095,7 +1118,7 @@ Multi-account support lives under `channels.discord.accounts` (see the multi-acc
 }
 ```
 
-Clawdbot starts Discord only when a `channels.discord` config section exists. The token is resolved from `channels.discord.token`, with `DISCORD_BOT_TOKEN` as a fallback for the default account (unless `channels.discord.enabled` is `false`). Use `user:<id>` (DM) or `channel:<id>` (guild channel) when specifying delivery targets for cron/CLI commands; bare numeric IDs are ambiguous and rejected.
+OpenClaw starts Discord only when a `channels.discord` config section exists. The token is resolved from `channels.discord.token`, with `DISCORD_BOT_TOKEN` as a fallback for the default account (unless `channels.discord.enabled` is `false`). Use `user:<id>` (DM) or `channel:<id>` (guild channel) when specifying delivery targets for cron/CLI commands; bare numeric IDs are ambiguous and rejected.
 Guild slugs are lowercase with spaces replaced by `-`; channel keys use the slugged channel name (no leading `#`). Prefer guild ids as keys to avoid rename ambiguity.
 Bot-authored messages are ignored by default. Enable with `channels.discord.allowBots` (own messages are still filtered to prevent self-reply loops).
 Reaction notification modes:
@@ -1103,8 +1126,46 @@ Reaction notification modes:
 - `own`: reactions on the bot's own messages (default).
 - `all`: all reactions on all messages.
 - `allowlist`: reactions from `guilds.<id>.users` on all messages (empty list disables).
-Outbound text is chunked by `channels.discord.textChunkLimit` (default 2000). Discord clients can clip very tall messages, so `channels.discord.maxLinesPerMessage` (default 17) splits long multi-line replies even when under 2000 chars.
+Outbound text is chunked by `channels.discord.textChunkLimit` (default 2000). Set `channels.discord.chunkMode="newline"` to split on blank lines (paragraph boundaries) before length chunking. Discord clients can clip very tall messages, so `channels.discord.maxLinesPerMessage` (default 17) splits long multi-line replies even when under 2000 chars.
 Retry policy defaults and behavior are documented in [Retry policy](/concepts/retry).
+
+### `channels.googlechat` (Chat API webhook)
+
+Google Chat runs over HTTP webhooks with app-level auth (service account).
+Multi-account support lives under `channels.googlechat.accounts` (see the multi-account section above). Env vars only apply to the default account.
+
+```json5
+{
+  channels: {
+    "googlechat": {
+      enabled: true,
+      serviceAccountFile: "/path/to/service-account.json",
+      audienceType: "app-url",             // app-url | project-number
+      audience: "https://gateway.example.com/googlechat",
+      webhookPath: "/googlechat",
+      botUser: "users/1234567890",        // optional; improves mention detection
+      dm: {
+        enabled: true,
+        policy: "pairing",                // pairing | allowlist | open | disabled
+        allowFrom: ["users/1234567890"]   // optional; "open" requires ["*"]
+      },
+      groupPolicy: "allowlist",
+      groups: {
+        "spaces/AAAA": { allow: true, requireMention: true }
+      },
+      actions: { reactions: true },
+      typingIndicator: "message",
+      mediaMaxMb: 20
+    }
+  }
+}
+```
+
+Notes:
+- Service account JSON can be inline (`serviceAccount`) or file-based (`serviceAccountFile`).
+- Env fallbacks for the default account: `GOOGLE_CHAT_SERVICE_ACCOUNT` or `GOOGLE_CHAT_SERVICE_ACCOUNT_FILE`.
+- `audienceType` + `audience` must match the Chat app’s webhook auth config.
+- Use `spaces/<spaceId>` or `users/<userId|email>` when setting delivery targets.
 
 ### `channels.slack` (socket mode)
 
@@ -1153,11 +1214,12 @@ Slack runs in Socket Mode and requires both a bot token and app token:
       },
       slashCommand: {
         enabled: true,
-        name: "clawd",
+        name: "openclaw",
         sessionPrefix: "slack:slash",
         ephemeral: true
       },
       textChunkLimit: 4000,
+      chunkMode: "length",
       mediaMaxMb: 20
     }
   }
@@ -1166,7 +1228,7 @@ Slack runs in Socket Mode and requires both a bot token and app token:
 
 Multi-account support lives under `channels.slack.accounts` (see the multi-account section above). Env tokens only apply to the default account.
 
-Clawdbot starts Slack when the provider is enabled and both tokens are set (via config or `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`). Use `user:<id>` (DM) or `channel:<id>` when specifying delivery targets for cron/CLI commands.
+OpenClaw starts Slack when the provider is enabled and both tokens are set (via config or `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`). Use `user:<id>` (DM) or `channel:<id>` when specifying delivery targets for cron/CLI commands.
 Set `channels.slack.configWrites: false` to block Slack-initiated config writes (including channel ID migrations and `/config set|unset`).
 
 Bot-authored messages are ignored by default. Enable with `channels.slack.allowBots` or `channels.slack.channels.<id>.allowBots`.
@@ -1189,6 +1251,45 @@ Slack action groups (gate `slack` tool actions):
 | pins | enabled | Pin/unpin/list |
 | memberInfo | enabled | Member info |
 | emojiList | enabled | Custom emoji list |
+
+### `channels.mattermost` (bot token)
+
+Mattermost ships as a plugin and is not bundled with the core install.
+Install it first: `openclaw plugins install @openclaw/mattermost` (or `./extensions/mattermost` from a git checkout).
+
+Mattermost requires a bot token plus the base URL for your server:
+
+```json5
+{
+  channels: {
+    mattermost: {
+      enabled: true,
+      botToken: "mm-token",
+      baseUrl: "https://chat.example.com",
+      dmPolicy: "pairing",
+      chatmode: "oncall", // oncall | onmessage | onchar
+      oncharPrefixes: [">", "!"],
+      textChunkLimit: 4000,
+      chunkMode: "length"
+    }
+  }
+}
+```
+
+OpenClaw starts Mattermost when the account is configured (bot token + base URL) and enabled. The token + base URL are resolved from `channels.mattermost.botToken` + `channels.mattermost.baseUrl` or `MATTERMOST_BOT_TOKEN` + `MATTERMOST_URL` for the default account (unless `channels.mattermost.enabled` is `false`).
+
+Chat modes:
+- `oncall` (default): respond to channel messages only when @mentioned.
+- `onmessage`: respond to every channel message.
+- `onchar`: respond when a message starts with a trigger prefix (`channels.mattermost.oncharPrefixes`, default `[">", "!"]`).
+
+Access control:
+- Default DMs: `channels.mattermost.dmPolicy="pairing"` (unknown senders get a pairing code).
+- Public DMs: `channels.mattermost.dmPolicy="open"` plus `channels.mattermost.allowFrom=["*"]`.
+- Groups: `channels.mattermost.groupPolicy="allowlist"` by default (mention-gated). Use `channels.mattermost.groupAllowFrom` to restrict senders.
+
+Multi-account support lives under `channels.mattermost.accounts` (see the multi-account section above). Env vars only apply to the default account.
+Use `channel:<id>` or `user:<id>` (or `@username`) when specifying delivery targets; bare ids are treated as channel ids.
 
 ### `channels.signal` (signal-cli)
 
@@ -1214,7 +1315,7 @@ Reaction notification modes:
 
 ### `channels.imessage` (imsg CLI)
 
-Clawdbot spawns `imsg rpc` (JSON-RPC over stdio). No daemon or port required.
+OpenClaw spawns `imsg rpc` (JSON-RPC over stdio). No daemon or port required.
 
 ```json5
 {
@@ -1255,16 +1356,28 @@ exec ssh -T gateway-host imsg "$@"
 
 Sets the **single global workspace directory** used by the agent for file operations.
 
-Default: `~/clawd`.
+Default: `~/.openclaw/workspace`.
 
 ```json5
 {
-  agents: { defaults: { workspace: "~/clawd" } }
+  agents: { defaults: { workspace: "~/.openclaw/workspace" } }
 }
 ```
 
 If `agents.defaults.sandbox` is enabled, non-main sessions can override this with their
 own per-scope workspaces under `agents.defaults.sandbox.workspaceRoot`.
+
+### `agents.defaults.repoRoot`
+
+Optional repository root to show in the system prompt’s Runtime line. If unset, OpenClaw
+tries to detect a `.git` directory by walking upward from the workspace (and current
+working directory). The path must exist to be used.
+
+```json5
+{
+  agents: { defaults: { repoRoot: "~/Projects/openclaw" } }
+}
+```
 
 ### `agents.defaults.skipBootstrap`
 
@@ -1283,7 +1396,7 @@ Use this for pre-seeded deployments where your workspace files come from a repo.
 Max characters of each workspace bootstrap file injected into the system prompt
 before truncation. Default: `20000`.
 
-When a file exceeds this limit, Clawdbot logs a warning and injects a truncated
+When a file exceeds this limit, OpenClaw logs a warning and injects a truncated
 head/tail with a marker.
 
 ```json5
@@ -1295,7 +1408,7 @@ head/tail with a marker.
 ### `agents.defaults.userTimezone`
 
 Sets the user’s timezone for **system prompt context** (not for timestamps in
-message envelopes). If unset, Clawdbot uses the host timezone at runtime.
+message envelopes). If unset, OpenClaw uses the host timezone at runtime.
 
 ```json5
 {
@@ -1335,7 +1448,7 @@ streaming, final replies) across channels unless already present.
 
 If `messages.responsePrefix` is unset, no prefix is applied by default. WhatsApp self-chat
 replies are the exception: they default to `[{identity.name}]` when set, otherwise
-`[clawdbot]`, so same-phone conversations stay legible.
+`[openclaw]`, so same-phone conversations stay legible.
 Set it to `"auto"` to derive `[{identity.name}]` for the routed agent (when set).
 
 #### Template variables
@@ -1364,13 +1477,13 @@ Unresolved variables remain as literal text.
 Example output: `[claude-opus-4-5 | think:high] Here's my response...`
 
 WhatsApp inbound prefix is configured via `channels.whatsapp.messagePrefix` (deprecated:
-`messages.messagePrefix`). Default stays **unchanged**: `"[clawdbot]"` when
+`messages.messagePrefix`). Default stays **unchanged**: `"[openclaw]"` when
 `channels.whatsapp.allowFrom` is empty, otherwise `""` (no prefix). When using
-`"[clawdbot]"`, Clawdbot will instead use `[{identity.name}]` when the routed
+`"[openclaw]"`, OpenClaw will instead use `[{identity.name}]` when the routed
 agent has `identity.name` set.
 
 `ackReaction` sends a best-effort emoji reaction to acknowledge inbound messages
-on channels that support reactions (Slack/Discord/Telegram). Defaults to the
+on channels that support reactions (Slack/Discord/Telegram/Google Chat). Defaults to the
 active agent’s `identity.emoji` when set, otherwise `"👀"`. Set it to `""` to disable.
 
 `ackReactionScope` controls when reactions fire:
@@ -1380,7 +1493,68 @@ active agent’s `identity.emoji` when set, otherwise `"👀"`. Set it to `""` t
 - `all`: all messages
 
 `removeAckAfterReply` removes the bot’s ack reaction after a reply is sent
-(Slack/Discord/Telegram only). Default: `false`.
+(Slack/Discord/Telegram/Google Chat only). Default: `false`.
+
+#### `messages.tts`
+
+Enable text-to-speech for outbound replies. When on, OpenClaw generates audio
+using ElevenLabs or OpenAI and attaches it to responses. Telegram uses Opus
+voice notes; other channels send MP3 audio.
+
+```json5
+{
+  messages: {
+    tts: {
+      auto: "always", // off | always | inbound | tagged
+      mode: "final", // final | all (include tool/block replies)
+      provider: "elevenlabs",
+      summaryModel: "openai/gpt-4.1-mini",
+      modelOverrides: {
+        enabled: true
+      },
+      maxTextLength: 4000,
+      timeoutMs: 30000,
+      prefsPath: "~/.openclaw/settings/tts.json",
+      elevenlabs: {
+        apiKey: "elevenlabs_api_key",
+        baseUrl: "https://api.elevenlabs.io",
+        voiceId: "voice_id",
+        modelId: "eleven_multilingual_v2",
+        seed: 42,
+        applyTextNormalization: "auto",
+        languageCode: "en",
+        voiceSettings: {
+          stability: 0.5,
+          similarityBoost: 0.75,
+          style: 0.0,
+          useSpeakerBoost: true,
+          speed: 1.0
+        }
+      },
+      openai: {
+        apiKey: "openai_api_key",
+        model: "gpt-4o-mini-tts",
+        voice: "alloy"
+      }
+    }
+  }
+}
+```
+
+Notes:
+- `messages.tts.auto` controls auto‑TTS (`off`, `always`, `inbound`, `tagged`).
+- `/tts off|always|inbound|tagged` sets the per‑session auto mode (overrides config).
+- `messages.tts.enabled` is legacy; doctor migrates it to `messages.tts.auto`.
+- `prefsPath` stores local overrides (provider/limit/summarize).
+- `maxTextLength` is a hard cap for TTS input; summaries are truncated to fit.
+- `summaryModel` overrides `agents.defaults.model.primary` for auto-summary.
+  - Accepts `provider/model` or an alias from `agents.defaults.models`.
+- `modelOverrides` enables model-driven overrides like `[[tts:...]]` tags (on by default).
+- `/tts limit` and `/tts summary` control per-user summarization settings.
+- `apiKey` values fall back to `ELEVENLABS_API_KEY`/`XI_API_KEY` and `OPENAI_API_KEY`.
+- `elevenlabs.baseUrl` overrides the ElevenLabs API base URL.
+- `elevenlabs.voiceSettings` supports `stability`/`similarityBoost`/`style` (0..1),
+  `useSpeakerBoost`, and `speed` (0.5..2.0).
 
 ### `talk`
 
@@ -1414,7 +1588,7 @@ Each `agents.defaults.models` entry can include:
 - `alias` (optional model shortcut, e.g. `/opus`).
 - `params` (optional provider-specific API params passed through to the model request).
 
-`params` is also applied to streaming runs (embedded agent + compaction). Supported keys today: `temperature`, `maxTokens`, `cacheControlTtl` (`"5m"` or `"1h"`, Anthropic API + OpenRouter Anthropic models only; ignored for Anthropic OAuth/Claude Code tokens). These merge with call-time options; caller-supplied values win. `temperature` is an advanced knob—leave unset unless you know the model’s defaults and need a change. Clawdbot includes the `extended-cache-ttl-2025-04-11` beta flag for Anthropic API; keep it if you override provider headers.
+`params` is also applied to streaming runs (embedded agent + compaction). Supported keys today: `temperature`, `maxTokens`. These merge with call-time options; caller-supplied values win. `temperature` is an advanced knob—leave unset unless you know the model’s defaults and need a change.
 
 Example:
 
@@ -1439,7 +1613,7 @@ Z.AI GLM-4.x models automatically enable thinking mode unless you:
 - set `--thinking off`, or
 - define `agents.defaults.models["zai/<model>"].params.thinking` yourself.
 
-Clawdbot also ships a few built-in alias shorthands. Defaults only apply when the model
+OpenClaw also ships a few built-in alias shorthands. Defaults only apply when the model
 is already present in `agents.defaults.models`:
 
 - `opus` -> `anthropic/claude-opus-4-5`
@@ -1569,7 +1743,7 @@ Example:
 }
 ```
 
-#### `agents.defaults.contextPruning` (TTL-aware tool-result pruning)
+#### `agents.defaults.contextPruning` (tool-result pruning)
 
 `agents.defaults.contextPruning` prunes **old tool results** from the in-memory context right before a request is sent to the LLM.
 It does **not** modify the session history on disk (`*.jsonl` remains complete).
@@ -1580,9 +1754,11 @@ High level:
 - Never touches user/assistant messages.
 - Protects the last `keepLastAssistants` assistant messages (no tool results after that point are pruned).
 - Protects the bootstrap prefix (nothing before the first user message is pruned).
-- Mode:
-  - `cache-ttl`: pruning only runs when the last Anthropic call for the session is **older** than `ttl`.
-    When it runs, it uses the same soft-trim + hard-clear behavior as before.
+- Modes:
+  - `adaptive`: soft-trims oversized tool results (keep head/tail) when the estimated context ratio crosses `softTrimRatio`.
+    Then hard-clears the oldest eligible tool results when the estimated context ratio crosses `hardClearRatio` **and**
+    there’s enough prunable tool-result bulk (`minPrunableToolChars`).
+  - `aggressive`: always replaces eligible tool results before the cutoff with the `hardClear.placeholder` (no ratio checks).
 
 Soft vs hard pruning (what changes in the context sent to the LLM):
 - **Soft-trim**: only for *oversized* tool results. Keeps the beginning + end and inserts `...` in the middle.
@@ -1596,41 +1772,44 @@ Notes / current limitations:
 - Tool results containing **image blocks are skipped** (never trimmed/cleared) right now.
 - The estimated “context ratio” is based on **characters** (approximate), not exact tokens.
 - If the session doesn’t contain at least `keepLastAssistants` assistant messages yet, pruning is skipped.
-- `cache-ttl` only activates for Anthropic API calls (and OpenRouter Anthropic models).
-- After a prune, the TTL window resets so subsequent requests keep cache until `ttl` expires again.
-- For best results, match `contextPruning.ttl` to the model `cacheControlTtl` you set in `agents.defaults.models.*.params`.
+- In `aggressive` mode, `hardClear.enabled` is ignored (eligible tool results are always replaced with `hardClear.placeholder`).
 
-Default (off, unless Anthropic auth profiles are detected):
+Default (adaptive):
+```json5
+{
+  agents: { defaults: { contextPruning: { mode: "adaptive" } } }
+}
+```
+
+To disable:
 ```json5
 {
   agents: { defaults: { contextPruning: { mode: "off" } } }
 }
 ```
 
-Enable TTL-aware pruning:
+Defaults (when `mode` is `"adaptive"` or `"aggressive"`):
+- `keepLastAssistants`: `3`
+- `softTrimRatio`: `0.3` (adaptive only)
+- `hardClearRatio`: `0.5` (adaptive only)
+- `minPrunableToolChars`: `50000` (adaptive only)
+- `softTrim`: `{ maxChars: 4000, headChars: 1500, tailChars: 1500 }` (adaptive only)
+- `hardClear`: `{ enabled: true, placeholder: "[Old tool result content cleared]" }`
+
+Example (aggressive, minimal):
 ```json5
 {
-  agents: { defaults: { contextPruning: { mode: "cache-ttl" } } }
+  agents: { defaults: { contextPruning: { mode: "aggressive" } } }
 }
 ```
 
-Defaults (when `mode` is `"cache-ttl"`):
-- `ttl`: `"5m"`
-- `keepLastAssistants`: `3`
-- `softTrimRatio`: `0.3`
-- `hardClearRatio`: `0.5`
-- `minPrunableToolChars`: `50000`
-- `softTrim`: `{ maxChars: 4000, headChars: 1500, tailChars: 1500 }`
-- `hardClear`: `{ enabled: true, placeholder: "[Old tool result content cleared]" }`
-
-Example (cache-ttl tuned):
+Example (adaptive tuned):
 ```json5
 {
   agents: {
     defaults: {
       contextPruning: {
-        mode: "cache-ttl",
-        ttl: "5m",
+        mode: "adaptive",
         keepLastAssistants: 3,
         softTrimRatio: 0.3,
         hardClearRatio: 0.5,
@@ -1659,7 +1838,7 @@ auto-compaction, instructing the model to store durable memories on disk (e.g.
 `memory/YYYY-MM-DD.md`). It triggers when the session token estimate crosses a
 soft threshold below the compaction limit.
 
-Defaults:
+Legacy defaults:
 - `memoryFlush.enabled`: `true`
 - `memoryFlush.softThresholdTokens`: `4000`
 - `memoryFlush.prompt` / `memoryFlush.systemPrompt`: built-in defaults with `NO_REPLY`
@@ -1701,11 +1880,13 @@ Block streaming:
   ```
 - `agents.defaults.blockStreamingCoalesce`: merge streamed blocks before sending.
   Defaults to `{ idleMs: 1000 }` and inherits `minChars` from `blockStreamingChunk`
-  with `maxChars` capped to the channel text limit. Signal/Slack/Discord default
+  with `maxChars` capped to the channel text limit. Signal/Slack/Discord/Google Chat default
   to `minChars: 1500` unless overridden.
   Channel overrides: `channels.whatsapp.blockStreamingCoalesce`, `channels.telegram.blockStreamingCoalesce`,
-  `channels.discord.blockStreamingCoalesce`, `channels.slack.blockStreamingCoalesce`, `channels.signal.blockStreamingCoalesce`,
-  `channels.imessage.blockStreamingCoalesce`, `channels.msteams.blockStreamingCoalesce` (and per-account variants).
+  `channels.discord.blockStreamingCoalesce`, `channels.slack.blockStreamingCoalesce`, `channels.mattermost.blockStreamingCoalesce`,
+  `channels.signal.blockStreamingCoalesce`, `channels.imessage.blockStreamingCoalesce`, `channels.msteams.blockStreamingCoalesce`,
+  `channels.googlechat.blockStreamingCoalesce`
+  (and per-account variants).
 - `agents.defaults.humanDelay`: randomized pause between **block replies** after the first.
   Modes: `off` (default), `natural` (800–2500ms), `custom` (use `minMs`/`maxMs`).
   Per-agent override: `agents.list[].humanDelay`.
@@ -1727,7 +1908,7 @@ See [/concepts/typing-indicators](/concepts/typing-indicators) for behavior deta
 
 `agents.defaults.model.primary` should be set as `provider/model` (e.g. `anthropic/claude-opus-4-5`).
 Aliases come from `agents.defaults.models.*.alias` (e.g. `Opus`).
-If you omit the provider, Clawdbot currently assumes `anthropic` as a temporary
+If you omit the provider, OpenClaw currently assumes `anthropic` as a temporary
 deprecation fallback.
 Z.AI models are available as `zai/<model>` (e.g. `zai/glm-4.7`) and require
 `ZAI_API_KEY` (or legacy `Z_AI_API_KEY`) in the environment.
@@ -1737,12 +1918,9 @@ Z.AI models are available as `zai/<model>` (e.g. `zai/glm-4.7`) and require
   `30m`. Set `0m` to disable.
 - `model`: optional override model for heartbeat runs (`provider/model`).
 - `includeReasoning`: when `true`, heartbeats will also deliver the separate `Reasoning:` message when available (same shape as `/reasoning on`). Default: `false`.
-- `activeHours`: optional local-time window that controls when heartbeats run.
-  - `start`: start time (HH:MM, 24h). Inclusive.
-  - `end`: end time (HH:MM, 24h). Exclusive. Use `"24:00"` for end-of-day.
-  - `timezone`: `"user"` (default), `"local"`, or an IANA timezone id.
-- `target`: optional delivery channel (`last`, `whatsapp`, `telegram`, `discord`, `slack`, `signal`, `imessage`, `none`). Default: `last`.
+- `session`: optional session key to control which session the heartbeat runs in. Default: `main`.
 - `to`: optional recipient override (channel-specific id, e.g. E.164 for WhatsApp, chat id for Telegram).
+- `target`: optional delivery channel (`last`, `whatsapp`, `telegram`, `discord`, `slack`, `msteams`, `signal`, `imessage`, `none`). Default: `last`.
 - `prompt`: optional override for the heartbeat body (default: `Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`). Overrides are sent verbatim; include a `Read HEARTBEAT.md` line if you still want the file read.
 - `ackMaxChars`: max chars allowed after `HEARTBEAT_OK` before delivery (default: 300).
 
@@ -1765,7 +1943,7 @@ Note: `applyPatch` is only under `tools.exec`.
 
 `tools.web` configures web search + fetch tools:
 - `tools.web.search.enabled` (default: true when key is present)
-- `tools.web.search.apiKey` (recommended: set via `clawdbot configure --section web`, or use `BRAVE_API_KEY` env var)
+- `tools.web.search.apiKey` (recommended: set via `openclaw configure --section web`, or use `BRAVE_API_KEY` env var)
 - `tools.web.search.maxResults` (1–10, default 5)
 - `tools.web.search.timeoutSeconds` (default 30)
 - `tools.web.search.cacheTtlMinutes` (default 15)
@@ -1773,7 +1951,6 @@ Note: `applyPatch` is only under `tools.exec`.
 - `tools.web.fetch.maxChars` (default 50000)
 - `tools.web.fetch.timeoutSeconds` (default 30)
 - `tools.web.fetch.cacheTtlMinutes` (default 15)
-- `tools.web.fetch.maxRedirects` (default 3)
 - `tools.web.fetch.userAgent` (optional override)
 - `tools.web.fetch.readability` (default true; disable to use basic HTML cleanup only)
 - `tools.web.fetch.firecrawl.enabled` (default true when an API key is set)
@@ -1799,7 +1976,7 @@ Note: `applyPatch` is only under `tools.exec`.
 - Each `models[]` entry:
   - Provider entry (`type: "provider"` or omitted):
     - `provider`: API provider id (`openai`, `anthropic`, `google`/`gemini`, `groq`, etc).
-    - `model`: model id override (required for image; defaults to `whisper-1`/`whisper-large-v3-turbo` for audio providers, and `gemini-3-flash-preview` for video).
+    - `model`: model id override (required for image; defaults to `gpt-4o-mini-transcribe`/`whisper-large-v3-turbo` for audio providers, and `gemini-3-flash-preview` for video).
     - `profile` / `preferredProfile`: auth profile selection.
   - CLI entry (`type: "cli"`):
     - `command`: executable to run.
@@ -1824,7 +2001,7 @@ Example:
           rules: [{ action: "allow", match: { chatType: "direct" } }]
         },
         models: [
-          { provider: "openai", model: "whisper-1" },
+          { provider: "openai", model: "gpt-4o-mini-transcribe" },
           { type: "cli", command: "whisper", args: ["--model", "base", "{{MediaPath}}"] }
         ]
       },
@@ -1840,7 +2017,7 @@ Example:
 
 `agents.defaults.subagents` configures sub-agent defaults:
 - `model`: default model for spawned sub-agents (string or `{ primary, fallbacks }`). If omitted, sub-agents inherit the caller’s model unless overridden per agent or per call.
-- `maxConcurrent`: max concurrent sub-agent runs (default 8)
+- `maxConcurrent`: max concurrent sub-agent runs (default 1)
 - `archiveAfterMinutes`: auto-archive sub-agent sessions after N minutes (default 60; set `0` to disable)
 - Per-subagent tool policy: `tools.subagents.tools.allow` / `tools.subagents.tools.deny` (deny wins)
 
@@ -1904,6 +2081,7 @@ Example (provider/model-specific allowlist):
 ```
 
 `tools.allow` / `tools.deny` configure a global tool allow/deny policy (deny wins).
+Matching is case-insensitive and supports `*` wildcards (`"*"` means all tools).
 This is applied even when the Docker sandbox is **off**.
 
 Example (disable browser/canvas everywhere):
@@ -1923,7 +2101,7 @@ Tool groups (shorthands) work in **global** and **per-agent** tool policies:
 - `group:automation`: `cron`, `gateway`
 - `group:messaging`: `message`
 - `group:nodes`: `nodes`
-- `group:clawdbot`: all built-in Clawdbot tools (excludes provider plugins)
+- `group:openclaw`: all built-in OpenClaw tools (excludes provider plugins)
 
 `tools.elevated` controls elevated (host) exec access:
 - `enabled`: allow elevated mode (default true)
@@ -1968,13 +2146,13 @@ Per-agent override (further restrict):
 
 Notes:
 - `tools.elevated` is the global baseline. `agents.list[].tools.elevated` can only further restrict (both must allow).
-- `/elevated on|off` stores state per session key; inline directives apply to a single message.
+- `/elevated on|off|ask|full` stores state per session key; inline directives apply to a single message.
 - Elevated `exec` runs on the host and bypasses sandboxing.
 - Tool policy still applies; if `exec` is denied, elevated cannot be used.
 
 `agents.defaults.maxConcurrent` sets the maximum number of embedded agent runs that can
 execute in parallel across sessions. Each session is still serialized (one run
-per session key at a time). Default: 4.
+per session key at a time). Default: 1.
 
 ### `agents.defaults.sandbox`
 
@@ -1987,7 +2165,7 @@ Defaults (if enabled):
 - scope: `"agent"` (one container + workspace per agent)
 - Debian bookworm-slim based image
 - agent workspace access: `workspaceAccess: "none"` (default)
-  - `"none"`: use a per-scope sandbox workspace under `~/.clawdbot/sandboxes`
+  - `"none"`: use a per-scope sandbox workspace under `~/.openclaw/sandboxes`
 - `"ro"`: keep the sandbox workspace at `/workspace`, and mount the agent workspace read-only at `/agent` (disables `write`/`edit`/`apply_patch`)
   - `"rw"`: mount the agent workspace read/write at `/workspace`
 - auto-prune: idle > 24h OR age > 7d
@@ -2014,10 +2192,10 @@ For package installs, ensure network egress, a writable root FS, and a root user
         mode: "non-main", // off | non-main | all
         scope: "agent", // session | agent | shared (agent is default)
         workspaceAccess: "none", // none | ro | rw
-        workspaceRoot: "~/.clawdbot/sandboxes",
+        workspaceRoot: "~/.openclaw/sandboxes",
         docker: {
-          image: "clawdbot-sandbox:bookworm-slim",
-          containerPrefix: "clawdbot-sbx-",
+          image: "openclaw-sandbox:bookworm-slim",
+          containerPrefix: "openclaw-sbx-",
           workdir: "/workspace",
           readOnlyRoot: true,
           tmpfs: ["/tmp", "/var/tmp", "/run"],
@@ -2036,15 +2214,15 @@ For package installs, ensure network egress, a writable root FS, and a root user
             nproc: 256
           },
           seccompProfile: "/path/to/seccomp.json",
-          apparmorProfile: "clawdbot-sandbox",
+          apparmorProfile: "openclaw-sandbox",
           dns: ["1.1.1.1", "8.8.8.8"],
           extraHosts: ["internal.service:10.0.0.5"],
           binds: ["/var/run/docker.sock:/var/run/docker.sock", "/home/user/source:/source:rw"]
         },
         browser: {
           enabled: false,
-          image: "clawdbot-sandbox-browser:bookworm-slim",
-          containerPrefix: "clawdbot-sbx-browser-",
+          image: "openclaw-sandbox-browser:bookworm-slim",
+          containerPrefix: "openclaw-sbx-browser-",
           cdpPort: 9222,
           vncPort: 5900,
           noVncPort: 6080,
@@ -2111,14 +2289,14 @@ Defaults: all allowlists are unset (no restriction). `allowHostControl` defaults
 
 ### `models` (custom providers + base URLs)
 
-Clawdbot uses the **pi-coding-agent** model catalog. You can add custom providers
+OpenClaw uses the **pi-coding-agent** model catalog. You can add custom providers
 (LiteLLM, local OpenAI-compatible servers, Anthropic proxies, etc.) by writing
-`~/.clawdbot/agents/<agentId>/agent/models.json` or by defining the same schema inside your
-Clawdbot config under `models.providers`.
+`~/.openclaw/agents/<agentId>/agent/models.json` or by defining the same schema inside your
+OpenClaw config under `models.providers`.
 Provider-by-provider overview + examples: [/concepts/model-providers](/concepts/model-providers).
 
-When `models.providers` is present, Clawdbot writes/merges a `models.json` into
-`~/.clawdbot/agents/<agentId>/agent/` on startup:
+When `models.providers` is present, OpenClaw writes/merges a `models.json` into
+`~/.openclaw/agents/<agentId>/agent/` on startup:
 - default behavior: **merge** (keeps existing providers, overrides on name)
 - set `models.mode: "replace"` to overwrite the file contents
 
@@ -2160,14 +2338,14 @@ Select the model via `agents.defaults.model.primary` (provider/model).
 
 ### OpenCode Zen (multi-model proxy)
 
-OpenCode Zen is a multi-model gateway with per-model endpoints. Clawdbot uses
+OpenCode Zen is a multi-model gateway with per-model endpoints. OpenClaw uses
 the built-in `opencode` provider from pi-ai; set `OPENCODE_API_KEY` (or
 `OPENCODE_ZEN_API_KEY`) from https://opencode.ai/auth.
 
 Notes:
 - Model refs use `opencode/<modelId>` (example: `opencode/claude-opus-4-5`).
 - If you enable an allowlist via `agents.defaults.models`, add each model you plan to use.
-- Shortcut: `clawdbot onboard --auth-choice opencode-zen`.
+- Shortcut: `openclaw onboard --auth-choice opencode-zen`.
 
 ```json5
 {
@@ -2185,7 +2363,7 @@ Notes:
 Z.AI models are available via the built-in `zai` provider. Set `ZAI_API_KEY`
 in your environment and reference the model by provider/model.
 
-Shortcut: `clawdbot onboard --auth-choice zai-api-key`.
+Shortcut: `openclaw onboard --auth-choice zai-api-key`.
 
 ```json5
 {
@@ -2218,8 +2396,8 @@ Use Moonshot's OpenAI-compatible endpoint:
   env: { MOONSHOT_API_KEY: "sk-..." },
   agents: {
     defaults: {
-      model: { primary: "moonshot/kimi-k2-0905-preview" },
-      models: { "moonshot/kimi-k2-0905-preview": { alias: "Kimi K2" } }
+      model: { primary: "moonshot/kimi-k2.5" },
+      models: { "moonshot/kimi-k2.5": { alias: "Kimi K2.5" } }
     }
   },
   models: {
@@ -2231,8 +2409,8 @@ Use Moonshot's OpenAI-compatible endpoint:
         api: "openai-completions",
         models: [
           {
-            id: "kimi-k2-0905-preview",
-            name: "Kimi K2 0905 Preview",
+            id: "kimi-k2.5",
+            name: "Kimi K2.5",
             reasoning: false,
             input: ["text"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -2247,8 +2425,8 @@ Use Moonshot's OpenAI-compatible endpoint:
 ```
 
 Notes:
-- Set `MOONSHOT_API_KEY` in the environment or use `clawdbot onboard --auth-choice moonshot-api-key`.
-- Model ref: `moonshot/kimi-k2-0905-preview`.
+- Set `MOONSHOT_API_KEY` in the environment or use `openclaw onboard --auth-choice moonshot-api-key`.
+- Model ref: `moonshot/kimi-k2.5`.
 - Use `https://api.moonshot.cn/v1` if you need the China endpoint.
 
 ### Kimi Code
@@ -2291,7 +2469,7 @@ Use Kimi Code's dedicated OpenAI-compatible endpoint (separate from Moonshot):
 ```
 
 Notes:
-- Set `KIMICODE_API_KEY` in the environment or use `clawdbot onboard --auth-choice kimi-code-api-key`.
+- Set `KIMICODE_API_KEY` in the environment or use `openclaw onboard --auth-choice kimi-code-api-key`.
 - Model ref: `kimi-code/kimi-for-coding`.
 
 ### Synthetic (Anthropic-compatible)
@@ -2332,7 +2510,7 @@ Use Synthetic's Anthropic-compatible endpoint:
 ```
 
 Notes:
-- Set `SYNTHETIC_API_KEY` or use `clawdbot onboard --auth-choice synthetic-api-key`.
+- Set `SYNTHETIC_API_KEY` or use `openclaw onboard --auth-choice synthetic-api-key`.
 - Model ref: `synthetic/hf:MiniMaxAI/MiniMax-M2.1`.
 - Base URL should omit `/v1` because the Anthropic client appends it.
 
@@ -2379,7 +2557,7 @@ Use MiniMax M2.1 directly without LM Studio:
 ```
 
 Notes:
-- Set `MINIMAX_API_KEY` environment variable or use `clawdbot onboard --auth-choice minimax-api`.
+- Set `MINIMAX_API_KEY` environment variable or use `openclaw onboard --auth-choice minimax-api`.
 - Available model: `MiniMax-M2.1` (default).
 - Update pricing in `models.json` if you need exact cost tracking.
 
@@ -2427,8 +2605,8 @@ Notes:
 - Supported APIs: `openai-completions`, `openai-responses`, `anthropic-messages`,
   `google-generative-ai`
 - Use `authHeader: true` + `headers` for custom auth needs.
-- Override the agent config root with `CLAWDBOT_AGENT_DIR` (or `PI_CODING_AGENT_DIR`)
-  if you want `models.json` stored elsewhere (default: `~/.clawdbot/agents/main/agent`).
+- Override the agent config root with `OPENCLAW_AGENT_DIR` (or `PI_CODING_AGENT_DIR`)
+  if you want `models.json` stored elsewhere (default: `~/.openclaw/agents/main/agent`).
 
 ### `session`
 
@@ -2452,13 +2630,10 @@ Controls session scoping, reset policy, reset triggers, and where the session st
       dm: { mode: "idle", idleMinutes: 240 },
       group: { mode: "idle", idleMinutes: 120 }
     },
-    resetByChannel: {
-      discord: { mode: "idle", idleMinutes: 10080 }
-    },
     resetTriggers: ["/new", "/reset"],
-    // Default is already per-agent under ~/.clawdbot/agents/<agentId>/sessions/sessions.json
+    // Default is already per-agent under ~/.openclaw/agents/<agentId>/sessions/sessions.json
     // You can override with {agentId} templating:
-    store: "~/.clawdbot/agents/{agentId}/sessions/sessions.json",
+    store: "~/.openclaw/agents/{agentId}/sessions/sessions.json",
     // Direct chats collapse to agent:<agentId>:<mainKey> (default: "main").
     mainKey: "main",
     agentToAgent: {
@@ -2482,15 +2657,16 @@ Fields:
   - `main`: all DMs share the main session for continuity.
   - `per-peer`: isolate DMs by sender id across channels.
   - `per-channel-peer`: isolate DMs per channel + sender (recommended for multi-user inboxes).
-- `identityLinks`: map canonical ids to provider-prefixed peers so the same person shares a DM session across channels when using `per-peer` or `per-channel-peer`.
+  - `per-account-channel-peer`: isolate DMs per account + channel + sender (recommended for multi-account inboxes).
+- `identityLinks`: map canonical ids to provider-prefixed peers so the same person shares a DM session across channels when using `per-peer`, `per-channel-peer`, or `per-account-channel-peer`.
   - Example: `alice: ["telegram:123456789", "discord:987654321012345678"]`.
 - `reset`: primary reset policy. Defaults to daily resets at 4:00 AM local time on the gateway host.
   - `mode`: `daily` or `idle` (default: `daily` when `reset` is present).
   - `atHour`: local hour (0-23) for the daily reset boundary.
   - `idleMinutes`: sliding idle window in minutes. When daily + idle are both configured, whichever expires first wins.
 - `resetByType`: per-session overrides for `dm`, `group`, and `thread`.
-  - If you only set legacy `session.idleMinutes` without any `reset`/`resetByType`, Clawdbot stays in idle-only mode for backward compatibility.
-- `resetByChannel`: channel-specific reset policy overrides (keyed by channel id, applies to all session types for that channel; overrides `reset`/`resetByType`).
+  - If you only set legacy `session.idleMinutes` without any `reset`/`resetByType`, OpenClaw stays in idle-only mode for backward compatibility.
+- `heartbeatIdleMinutes`: optional idle override for heartbeat checks (daily reset still applies when enabled).
 - `agentToAgent.maxPingPongTurns`: max reply-back turns between requester/target (0–5, default 5).
 - `sendPolicy.default`: `allow` or `deny` fallback when no rule matches.
 - `sendPolicy.rules[]`: match by `channel`, `chatType` (`direct|group|room`), or `keyPrefix` (e.g. `cron:`). First deny wins; otherwise allow.
@@ -2498,7 +2674,7 @@ Fields:
 ### `skills` (skills config)
 
 Controls bundled allowlist, install preferences, extra skill folders, and per-skill
-overrides. Applies to **bundled** skills and `~/.clawdbot/skills` (workspace skills
+overrides. Applies to **bundled** skills and `~/.openclaw/skills` (workspace skills
 still win on name conflicts).
 
 Fields:
@@ -2547,7 +2723,7 @@ Example:
 ### `plugins` (extensions)
 
 Controls plugin discovery, allow/deny, and per-plugin config. Plugins are loaded
-from `~/.clawdbot/extensions`, `<workspace>/.clawdbot/extensions`, plus any
+from `~/.openclaw/extensions`, `<workspace>/.openclaw/extensions`, plus any
 `plugins.load.paths` entries. **Config changes require a gateway restart.**
 See [/plugin](/plugin) for full usage.
 
@@ -2582,9 +2758,9 @@ Example:
 }
 ```
 
-### `browser` (clawd-managed browser)
+### `browser` (openclaw-managed browser)
 
-Clawdbot can start a **dedicated, isolated** Chrome/Brave/Edge/Chromium instance for clawd and expose a small loopback control server.
+OpenClaw can start a **dedicated, isolated** Chrome/Brave/Edge/Chromium instance for openclaw and expose a small loopback control service.
 Profiles can point at a **remote** Chromium-based browser via `profiles.<name>.cdpUrl`. Remote
 profiles are attach-only (start/stop/reset are disabled).
 
@@ -2593,21 +2769,22 @@ scheme/host for profiles that only set `cdpPort`.
 
 Defaults:
 - enabled: `true`
-- control URL: `http://127.0.0.1:18791` (CDP uses `18792`)
-- CDP URL: `http://127.0.0.1:18792` (control URL + 1, legacy single-profile)
+- evaluateEnabled: `true` (set `false` to disable `act:evaluate` and `wait --fn`)
+- control service: loopback only (port derived from `gateway.port`, default `18791`)
+- CDP URL: `http://127.0.0.1:18792` (control service + 1, legacy single-profile)
 - profile color: `#FF4500` (lobster-orange)
-- Note: the control server is started by the running gateway (Clawdbot.app menubar, or `clawdbot gateway`).
+- Note: the control server is started by the running gateway (OpenClaw.app menubar, or `openclaw gateway`).
 - Auto-detect order: default browser if Chromium-based; otherwise Chrome → Brave → Edge → Chromium → Chrome Canary.
 
 ```json5
 {
   browser: {
     enabled: true,
-    controlUrl: "http://127.0.0.1:18791",
+    evaluateEnabled: true,
     // cdpUrl: "http://127.0.0.1:18792", // legacy single-profile override
     defaultProfile: "chrome",
     profiles: {
-      clawd: { cdpPort: 18800, color: "#FF4500" },
+      openclaw: { cdpPort: 18800, color: "#FF4500" },
       work: { cdpPort: 18801, color: "#0066CC" },
       remote: { cdpUrl: "http://10.0.0.42:9222", color: "#00AA00" }
     },
@@ -2617,12 +2794,9 @@ Defaults:
     // noSandbox: false,
     // executablePath: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
     // attachOnly: false, // set true when tunneling a remote CDP to localhost
-    // snapshotDefaults: { mode: "efficient" }, // tool/CLI default snapshot preset
   }
 }
 ```
-
-Note: `browser.snapshotDefaults` only affects Clawdbot's browser tool + CLI. Direct HTTP clients must pass `mode` explicitly.
 
 ### `ui` (Appearance)
 
@@ -2633,7 +2807,13 @@ If unset, clients fall back to a muted light-blue.
 ```json5
 {
   ui: {
-    seamColor: "#FF4500" // hex (RRGGBB or #RRGGBB)
+    seamColor: "#FF4500", // hex (RRGGBB or #RRGGBB)
+    // Optional: Control UI assistant identity override.
+    // If unset, the Control UI uses the active agent identity (config or IDENTITY.md).
+    assistant: {
+      name: "OpenClaw",
+      avatar: "CB" // emoji, short text, or image URL/data URI
+    }
   }
 }
 ```
@@ -2647,20 +2827,13 @@ Defaults:
 - bind: `loopback`
 - port: `18789` (single port for WS + HTTP)
 
-Bind modes:
-- `loopback`: `127.0.0.1` (local-only)
-- `lan`: `0.0.0.0` (all interfaces)
-- `tailnet`: Tailscale IPv4 address (100.64.0.0/10)
-- `auto`: prefer loopback, fall back to LAN if loopback cannot bind
-- `custom`: `gateway.customBindHost` (IPv4), fallback to LAN if unavailable
-
 ```json5
 {
   gateway: {
     mode: "local", // or "remote"
     port: 18789, // WS + HTTP multiplex
     bind: "loopback",
-    // controlUi: { enabled: true, basePath: "/clawdbot" }
+    // controlUi: { enabled: true, basePath: "/openclaw" }
     // auth: { mode: "token", token: "your-token" } // token gates WS + Control UI access
     // tailscale: { mode: "off" | "serve" | "funnel" }
   }
@@ -2669,8 +2842,13 @@ Bind modes:
 
 Control UI base path:
 - `gateway.controlUi.basePath` sets the URL prefix where the Control UI is served.
-- Examples: `"/ui"`, `"/clawdbot"`, `"/apps/clawdbot"`.
+- Examples: `"/ui"`, `"/openclaw"`, `"/apps/openclaw"`.
 - Default: root (`/`) (unchanged).
+- `gateway.controlUi.allowInsecureAuth` allows token-only auth for the Control UI when
+  device identity is omitted (typically over HTTP). Default: `false`. Prefer HTTPS
+  (Tailscale Serve) or `127.0.0.1`.
+- `gateway.controlUi.dangerouslyDisableDeviceAuth` disables device identity checks for the
+  Control UI (token/password only). Default: `false`. Break-glass only.
 
 Related docs:
 - [Control UI](/web/control-ui)
@@ -2678,44 +2856,46 @@ Related docs:
 - [Tailscale](/gateway/tailscale)
 - [Remote access](/gateway/remote)
 
+Trusted proxies:
+- `gateway.trustedProxies`: list of reverse proxy IPs that terminate TLS in front of the Gateway.
+- When a connection comes from one of these IPs, OpenClaw uses `x-forwarded-for` (or `x-real-ip`) to determine the client IP for local pairing checks and HTTP auth/local checks.
+- Only list proxies you fully control, and ensure they **overwrite** incoming `x-forwarded-for`.
+
 Notes:
-- `clawdbot gateway` refuses to start unless `gateway.mode` is set to `local` (or you pass the override flag).
+- `openclaw gateway` refuses to start unless `gateway.mode` is set to `local` (or you pass the override flag).
 - `gateway.port` controls the single multiplexed port used for WebSocket + HTTP (control UI, hooks, A2UI).
 - OpenAI Chat Completions endpoint: **disabled by default**; enable with `gateway.http.endpoints.chatCompletions.enabled: true`.
-- OpenResponses endpoint: **disabled by default**; enable with `gateway.http.endpoints.responses.enabled: true`.
-- Precedence: `--port` > `CLAWDBOT_GATEWAY_PORT` > `gateway.port` > default `18789`.
-- Non-loopback binds (`lan`/`tailnet`/`custom`, or `auto` when loopback is unavailable) require auth. Use `gateway.auth.token` (or `CLAWDBOT_GATEWAY_TOKEN`).
+- Precedence: `--port` > `OPENCLAW_GATEWAY_PORT` > `gateway.port` > default `18789`.
+- Gateway auth is required by default (token/password or Tailscale Serve identity). Non-loopback binds require a shared token/password.
 - The onboarding wizard generates a gateway token by default (even on loopback).
 - `gateway.remote.token` is **only** for remote CLI calls; it does not enable local gateway auth. `gateway.token` is ignored.
 
 Auth and Tailscale:
-- `gateway.auth.mode` sets the handshake requirements (`token` or `password`).
-- `gateway.auth.token` stores the shared token for token auth (used by the CLI on the same machine and as the bootstrap credential for device pairing).
+- `gateway.auth.mode` sets the handshake requirements (`token` or `password`). When unset, token auth is assumed.
+- `gateway.auth.token` stores the shared token for token auth (used by the CLI on the same machine).
 - When `gateway.auth.mode` is set, only that method is accepted (plus optional Tailscale headers).
-- `gateway.auth.password` can be set here, or via `CLAWDBOT_GATEWAY_PASSWORD` (recommended).
+- `gateway.auth.password` can be set here, or via `OPENCLAW_GATEWAY_PASSWORD` (recommended).
 - `gateway.auth.allowTailscale` allows Tailscale Serve identity headers
   (`tailscale-user-login`) to satisfy auth when the request arrives on loopback
-  with `x-forwarded-for`, `x-forwarded-proto`, and `x-forwarded-host`. When
-  `true`, Serve requests do not need a token/password; set `false` to require
-  explicit credentials. Defaults to `true` when `tailscale.mode = "serve"` and
-  auth mode is not `password`.
-- After pairing, the Gateway issues **device tokens** scoped to the device role + scopes.
-  These are returned in `hello-ok.auth.deviceToken`; clients should persist and reuse them
-  instead of the shared token. Rotate/revoke via `device.token.rotate`/`device.token.revoke`.
+  with `x-forwarded-for`, `x-forwarded-proto`, and `x-forwarded-host`. OpenClaw
+  verifies the identity by resolving the `x-forwarded-for` address via
+  `tailscale whois` before accepting it. When `true`, Serve requests do not need
+  a token/password; set `false` to require explicit credentials. Defaults to
+  `true` when `tailscale.mode = "serve"` and auth mode is not `password`.
 - `gateway.tailscale.mode: "serve"` uses Tailscale Serve (tailnet only, loopback bind).
 - `gateway.tailscale.mode: "funnel"` exposes the dashboard publicly; requires auth.
 - `gateway.tailscale.resetOnExit` resets Serve/Funnel config on shutdown.
 
 Remote client defaults (CLI):
 - `gateway.remote.url` sets the default Gateway WebSocket URL for CLI calls when `gateway.mode = "remote"`.
+- `gateway.remote.transport` selects the macOS remote transport (`ssh` default, `direct` for ws/wss). When `direct`, `gateway.remote.url` must be `ws://` or `wss://`. `ws://host` defaults to port `18789`.
 - `gateway.remote.token` supplies the token for remote calls (leave unset for no auth).
 - `gateway.remote.password` supplies the password for remote calls (leave unset for no auth).
-- `gateway.remote.tlsFingerprint` pins the gateway TLS cert fingerprint (sha256).
 
 macOS app behavior:
-- Clawdbot.app watches `~/.clawdbot/clawdbot.json` and switches modes live when `gateway.mode` or `gateway.remote.url` changes.
+- OpenClaw.app watches `~/.openclaw/openclaw.json` and switches modes live when `gateway.mode` or `gateway.remote.url` changes.
 - If `gateway.mode` is unset but `gateway.remote.url` is set, the macOS app treats it as remote mode.
-- When you change connection mode in the macOS app, it writes `gateway.mode` (and `gateway.remote.url` in remote mode) back to the config file.
+- When you change connection mode in the macOS app, it writes `gateway.mode` (and `gateway.remote.url` + `gateway.remote.transport` in remote mode) back to the config file.
 
 ```json5
 {
@@ -2724,39 +2904,30 @@ macOS app behavior:
     remote: {
       url: "ws://gateway.tailnet:18789",
       token: "your-token",
-      password: "your-password",
-      tlsFingerprint: "sha256:ab12cd34..."
+      password: "your-password"
     }
   }
 }
 ```
 
-### `gateway.nodes` (Node command allowlist)
-
-The Gateway enforces a per-platform command allowlist for `node.invoke`. Nodes must both
-**declare** a command and have it **allowed** by the Gateway to run it.
-
-Use this section to extend or deny commands:
+Direct transport example (macOS app):
 
 ```json5
 {
   gateway: {
-    nodes: {
-      allowCommands: ["custom.vendor.command"], // extra commands beyond defaults
-      denyCommands: ["sms.send"]      // block a command even if declared
+    mode: "remote",
+    remote: {
+      transport: "direct",
+      url: "wss://gateway.example.ts.net",
+      token: "your-token"
     }
   }
 }
 ```
 
-Notes:
-- `allowCommands` extends the built-in per-platform defaults.
-- `denyCommands` always wins (even if the node claims the command).
-- `node.invoke` rejects commands that are not declared by the node.
-
 ### `gateway.reload` (Config hot reload)
 
-The Gateway watches `~/.clawdbot/clawdbot.json` (or `CLAWDBOT_CONFIG_PATH`) and applies changes automatically.
+The Gateway watches `~/.openclaw/openclaw.json` (or `OPENCLAW_CONFIG_PATH`) and applies changes automatically.
 
 Modes:
 - `hybrid` (default): hot-apply safe changes; restart the Gateway for critical changes.
@@ -2778,7 +2949,7 @@ Modes:
 #### Hot reload matrix (files + impact)
 
 Files watched:
-- `~/.clawdbot/clawdbot.json` (or `CLAWDBOT_CONFIG_PATH`)
+- `~/.openclaw/openclaw.json` (or `OPENCLAW_CONFIG_PATH`)
 
 Hot-applied (no full gateway restart):
 - `hooks` (webhook auth/path/mappings) + `hooks.gmail` (Gmail watcher restarted)
@@ -2791,7 +2962,7 @@ Hot-applied (no full gateway restart):
 
 Requires full Gateway restart:
 - `gateway` (port/bind/auth/control UI/tailscale)
-- `bridge`
+- `bridge` (legacy)
 - `discovery`
 - `canvasHost`
 - `plugins`
@@ -2800,23 +2971,23 @@ Requires full Gateway restart:
 ### Multi-instance isolation
 
 To run multiple gateways on one host (for redundancy or a rescue bot), isolate per-instance state + config and use unique ports:
-- `CLAWDBOT_CONFIG_PATH` (per-instance config)
-- `CLAWDBOT_STATE_DIR` (sessions/creds)
+- `OPENCLAW_CONFIG_PATH` (per-instance config)
+- `OPENCLAW_STATE_DIR` (sessions/creds)
 - `agents.defaults.workspace` (memories)
 - `gateway.port` (unique per instance)
 
 Convenience flags (CLI):
-- `clawdbot --dev …` → uses `~/.clawdbot-dev` + shifts ports from base `19001`
-- `clawdbot --profile <name> …` → uses `~/.clawdbot-<name>` (port via config/env/flags)
+- `openclaw --dev …` → uses `~/.openclaw-dev` + shifts ports from base `19001`
+- `openclaw --profile <name> …` → uses `~/.openclaw-<name>` (port via config/env/flags)
 
-See [Gateway runbook](/gateway) for the derived port mapping (gateway/bridge/browser/canvas).
+See [Gateway runbook](/gateway) for the derived port mapping (gateway/browser/canvas).
 See [Multiple gateways](/gateway/multiple-gateways) for browser/CDP port isolation details.
 
 Example:
 ```bash
-CLAWDBOT_CONFIG_PATH=~/.clawdbot/a.json \
-CLAWDBOT_STATE_DIR=~/.clawdbot-a \
-clawdbot gateway --port 19001
+OPENCLAW_CONFIG_PATH=~/.openclaw/a.json \
+OPENCLAW_STATE_DIR=~/.openclaw-a \
+openclaw gateway --port 19001
 ```
 
 ### `hooks` (Gateway webhooks)
@@ -2835,7 +3006,7 @@ Defaults:
     token: "shared-secret",
     path: "/hooks",
     presets: ["gmail"],
-    transformsDir: "~/.clawdbot/hooks",
+    transformsDir: "~/.openclaw/hooks",
     mappings: [
       {
         match: { path: "gmail" },
@@ -2856,7 +3027,7 @@ Defaults:
 
 Requests must include the hook token:
 - `Authorization: Bearer <token>` **or**
-- `x-clawdbot-token: <token>` **or**
+- `x-openclaw-token: <token>` **or**
 - `?token=<token>`
 
 Endpoints:
@@ -2872,16 +3043,16 @@ Mapping notes:
 - Templates like `{{messages[0].subject}}` read from the payload.
 - `transform` can point to a JS/TS module that returns a hook action.
 - `deliver: true` sends the final reply to a channel; `channel` defaults to `last` (falls back to WhatsApp).
-- If there is no prior delivery route, set `channel` + `to` explicitly (required for Telegram/Discord/Slack/Signal/iMessage/MS Teams).
+- If there is no prior delivery route, set `channel` + `to` explicitly (required for Telegram/Discord/Google Chat/Slack/Signal/iMessage/MS Teams).
 - `model` overrides the LLM for this hook run (`provider/model` or alias; must be allowed if `agents.defaults.models` is set).
 
-Gmail helper config (used by `clawdbot webhooks gmail setup` / `run`):
+Gmail helper config (used by `openclaw webhooks gmail setup` / `run`):
 
 ```json5
 {
   hooks: {
     gmail: {
-      account: "clawdbot@gmail.com",
+      account: "openclaw@gmail.com",
       topic: "projects/<project-id>/topics/gog-gmail-watch",
       subscription: "gog-gmail-watch-push",
       pushToken: "shared-push-token",
@@ -2913,11 +3084,11 @@ Model override for Gmail hooks:
 Gateway auto-start:
 - If `hooks.enabled=true` and `hooks.gmail.account` is set, the Gateway starts
   `gog gmail watch serve` on boot and auto-renews the watch.
-- Set `CLAWDBOT_SKIP_GMAIL_WATCHER=1` to disable the auto-start (for manual runs).
+- Set `OPENCLAW_SKIP_GMAIL_WATCHER=1` to disable the auto-start (for manual runs).
 - Avoid running a separate `gog gmail watch serve` alongside the Gateway; it will
   fail with `listen tcp 127.0.0.1:8788: bind: address already in use`.
 
-Note: when `tailscale.mode` is on, Clawdbot defaults `serve.path` to `/` so
+Note: when `tailscale.mode` is on, OpenClaw defaults `serve.path` to `/` so
 Tailscale can proxy `/gmail-pubsub` correctly (it strips the set-path prefix).
 If you need the backend to receive the prefixed path, set
 `hooks.gmail.tailscale.target` to a full URL (and align `serve.path`).
@@ -2926,16 +3097,16 @@ If you need the backend to receive the prefixed path, set
 
 The Gateway serves a directory of HTML/CSS/JS over HTTP so iOS/Android nodes can simply `canvas.navigate` to it.
 
-Default root: `~/clawd/canvas`  
-Default port: `18793` (chosen to avoid the clawd browser CDP port `18792`)  
-The server listens on the **bridge bind host** (LAN or Tailnet) so nodes can reach it.
+Default root: `~/.openclaw/workspace/canvas`  
+Default port: `18793` (chosen to avoid the openclaw browser CDP port `18792`)  
+The server listens on the **gateway bind host** (LAN or Tailnet) so nodes can reach it.
 
 The server:
 - serves files under `canvasHost.root`
 - injects a tiny live-reload client into served HTML
-- watches the directory and broadcasts reloads over a WebSocket endpoint at `/__clawdbot/ws`
+- watches the directory and broadcasts reloads over a WebSocket endpoint at `/__openclaw__/ws`
 - auto-creates a starter `index.html` when the directory is empty (so you see something immediately)
-- also serves A2UI at `/__clawdbot__/a2ui/` and is advertised to nodes as `canvasHostUrl`
+- also serves A2UI at `/__openclaw__/a2ui/` and is advertised to nodes as `canvasHostUrl`
   (always used by nodes for Canvas/A2UI)
 
 Disable live reload (and file watching) if the directory is large or you hit `EMFILE`:
@@ -2944,7 +3115,7 @@ Disable live reload (and file watching) if the directory is large or you hit `EM
 ```json5
 {
   canvasHost: {
-    root: "~/clawd/canvas",
+    root: "~/.openclaw/workspace/canvas",
     port: 18793,
     liveReload: true
   }
@@ -2955,11 +3126,15 @@ Changes to `canvasHost.*` require a gateway restart (config reload will restart)
 
 Disable with:
 - config: `canvasHost: { enabled: false }`
-- env: `CLAWDBOT_SKIP_CANVAS_HOST=1`
+- env: `OPENCLAW_SKIP_CANVAS_HOST=1`
 
-### `bridge` (node bridge server)
+### `bridge` (legacy TCP bridge, removed)
 
-The Gateway can expose a simple TCP bridge for nodes (iOS/Android), typically on port `18790`.
+Current builds no longer include the TCP bridge listener; `bridge.*` config keys are ignored.
+Nodes connect over the Gateway WebSocket. This section is kept for historical reference.
+
+Legacy behavior:
+- The Gateway could expose a simple TCP bridge for nodes (iOS/Android), typically on port `18790`.
 
 Defaults:
 - enabled: `true`
@@ -2991,26 +3166,41 @@ Auto-generated certs require `openssl` on PATH; if generation fails, the bridge 
     bind: "tailnet",
     tls: {
       enabled: true,
-      // Uses ~/.clawdbot/bridge/tls/bridge-{cert,key}.pem when omitted.
-      // certPath: "~/.clawdbot/bridge/tls/bridge-cert.pem",
-      // keyPath: "~/.clawdbot/bridge/tls/bridge-key.pem"
+      // Uses ~/.openclaw/bridge/tls/bridge-{cert,key}.pem when omitted.
+      // certPath: "~/.openclaw/bridge/tls/bridge-cert.pem",
+      // keyPath: "~/.openclaw/bridge/tls/bridge-key.pem"
     }
   }
 }
 ```
 
+### `discovery.mdns` (Bonjour / mDNS broadcast mode)
+
+Controls LAN mDNS discovery broadcasts (`_openclaw-gw._tcp`).
+
+- `minimal` (default): omit `cliPath` + `sshPort` from TXT records
+- `full`: include `cliPath` + `sshPort` in TXT records
+- `off`: disable mDNS broadcasts entirely
+- Hostname: defaults to `openclaw` (advertises `openclaw.local`). Override with `OPENCLAW_MDNS_HOSTNAME`.
+
+```json5
+{
+  discovery: { mdns: { mode: "minimal" } }
+}
+```
+
 ### `discovery.wideArea` (Wide-Area Bonjour / unicast DNS‑SD)
 
-When enabled, the Gateway writes a unicast DNS-SD zone for `_clawdbot-gw._tcp` under `~/.clawdbot/dns/` using the standard discovery domain `clawdbot.internal.`
+When enabled, the Gateway writes a unicast DNS-SD zone for `_openclaw-gw._tcp` under `~/.openclaw/dns/` using the configured discovery domain (example: `openclaw.internal.`).
 
 To make iOS/Android discover across networks (Vienna ⇄ London), pair this with:
-- a DNS server on the gateway host serving `clawdbot.internal.` (CoreDNS is recommended)
-- Tailscale **split DNS** so clients resolve `clawdbot.internal` via that server
+- a DNS server on the gateway host serving your chosen domain (CoreDNS is recommended)
+- Tailscale **split DNS** so clients resolve that domain via the gateway DNS server
 
 One-time setup helper (gateway host):
 
 ```bash
-clawdbot dns setup --apply
+openclaw dns setup --apply
 ```
 
 ```json5
@@ -3031,9 +3221,6 @@ Template placeholders are expanded in `tools.media.*.models[].args` and `tools.m
 | `{{From}}` | Sender identifier (E.164 for WhatsApp; may differ per channel) |
 | `{{To}}` | Destination identifier |
 | `{{MessageSid}}` | Channel message id (when available) |
-| `{{MessageSidFull}}` | Provider-specific full message id when `MessageSid` is shortened |
-| `{{ReplyToId}}` | Reply-to message id (when available) |
-| `{{ReplyToIdFull}}` | Provider-specific full reply-to id when `ReplyToId` is shortened |
 | `{{SessionId}}` | Current session UUID |
 | `{{IsNewSession}}` | `"true"` when a new session was created |
 | `{{MediaUrl}}` | Inbound media pseudo-URL (if present) |
@@ -3047,7 +3234,7 @@ Template placeholders are expanded in `tools.media.*.models[].args` and `tools.m
 | `{{GroupMembers}}` | Group members preview (best effort) |
 | `{{SenderName}}` | Sender display name (best effort) |
 | `{{SenderE164}}` | Sender phone number (best effort) |
-| `{{Provider}}` | Provider hint (whatsapp|telegram|discord|slack|signal|imessage|msteams|webchat|…) |
+| `{{Provider}}` | Provider hint (whatsapp|telegram|discord|googlechat|slack|signal|imessage|msteams|webchat|…) |
 
 ## Cron (Gateway scheduler)
 

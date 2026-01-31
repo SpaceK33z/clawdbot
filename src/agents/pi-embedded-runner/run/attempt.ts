@@ -4,23 +4,33 @@ import os from "node:os";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
-import { createAgentSession, SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  SessionManager,
+  SettingsManager,
+} from "@mariozechner/pi-coding-agent";
 
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
-import { listChannelSupportedActions } from "../../channel-tools.js";
+import {
+  listChannelSupportedActions,
+  resolveChannelMessageToolHints,
+} from "../../channel-tools.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { resolveTelegramInlineButtonsScope } from "../../../telegram/inline-buttons.js";
 import { resolveTelegramReactionLevel } from "../../../telegram/reaction-level.js";
+import { resolveSignalReactionLevel } from "../../../signal/reaction-level.js";
 import { normalizeMessageChannel } from "../../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { resolveUserPath } from "../../../utils.js";
 import { createCacheTrace } from "../../cache-trace.js";
-import { resolveClawdbotAgentDir } from "../../agent-paths.js";
+import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
+import { resolveOpenClawAgentDir } from "../../agent-paths.js";
 import { resolveSessionAgentIds } from "../../agent-scope.js";
 import { makeBootstrapWarn, resolveBootstrapContextForRun } from "../../bootstrap-files.js";
-import { resolveClawdbotDocsPath } from "../../docs-path.js";
+import { resolveOpenClawDocsPath } from "../../docs-path.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
 import {
   isCloudCodeAssistFormatError,
@@ -33,9 +43,10 @@ import {
   ensurePiCompactionReserveTokens,
   resolveCompactionReserveTokensFloor,
 } from "../../pi-settings.js";
-import { createClawdbotCodingTools } from "../../pi-tools.js";
+import { createOpenClawCodingTools } from "../../pi-tools.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
+import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { acquireSessionWriteLock } from "../../session-write-lock.js";
 import {
   applySkillEnvOverrides,
@@ -43,6 +54,7 @@ import {
   loadWorkspaceSkillEntries,
   resolveSkillsPromptForRun,
 } from "../../skills.js";
+import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { resolveDefaultModelForAgent } from "../../model-selection.js";
 
@@ -72,6 +84,7 @@ import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { describeUnknownError, mapThinkingLevel } from "../utils.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
+import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
@@ -181,35 +194,50 @@ export async function runEmbeddedAttempt(
         sessionId: params.sessionId,
         warn: makeBootstrapWarn({ sessionLabel, warn: (message) => log.warn(message) }),
       });
+    const workspaceNotes = hookAdjustedBootstrapFiles.some(
+      (file) => file.name === DEFAULT_BOOTSTRAP_FILENAME && !file.missing,
+    )
+      ? ["Reminder: commit your changes in this workspace after edits."]
+      : undefined;
 
-    const agentDir = params.agentDir ?? resolveClawdbotAgentDir();
+    const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
 
     // Check if the model supports native image input
     const modelHasVision = params.model.input?.includes("image") ?? false;
-    const toolsRaw = createClawdbotCodingTools({
-      exec: {
-        ...params.execOverrides,
-        elevated: params.bashElevated,
-      },
-      sandbox,
-      messageProvider: params.messageChannel ?? params.messageProvider,
-      agentAccountId: params.agentAccountId,
-      messageTo: params.messageTo,
-      messageThreadId: params.messageThreadId,
-      sessionKey: params.sessionKey ?? params.sessionId,
-      agentDir,
-      workspaceDir: effectiveWorkspace,
-      config: params.config,
-      abortSignal: runAbortController.signal,
-      modelProvider: params.model.provider,
-      modelId: params.modelId,
-      modelAuthMode: resolveModelAuthMode(params.model.provider, params.config),
-      currentChannelId: params.currentChannelId,
-      currentThreadTs: params.currentThreadTs,
-      replyToMode: params.replyToMode,
-      hasRepliedRef: params.hasRepliedRef,
-      modelHasVision,
-    });
+    const toolsRaw = params.disableTools
+      ? []
+      : createOpenClawCodingTools({
+          exec: {
+            ...params.execOverrides,
+            elevated: params.bashElevated,
+          },
+          sandbox,
+          messageProvider: params.messageChannel ?? params.messageProvider,
+          agentAccountId: params.agentAccountId,
+          messageTo: params.messageTo,
+          messageThreadId: params.messageThreadId,
+          groupId: params.groupId,
+          groupChannel: params.groupChannel,
+          groupSpace: params.groupSpace,
+          spawnedBy: params.spawnedBy,
+          senderId: params.senderId,
+          senderName: params.senderName,
+          senderUsername: params.senderUsername,
+          senderE164: params.senderE164,
+          sessionKey: params.sessionKey ?? params.sessionId,
+          agentDir,
+          workspaceDir: effectiveWorkspace,
+          config: params.config,
+          abortSignal: runAbortController.signal,
+          modelProvider: params.model.provider,
+          modelId: params.modelId,
+          modelAuthMode: resolveModelAuthMode(params.model.provider, params.config),
+          currentChannelId: params.currentChannelId,
+          currentThreadTs: params.currentThreadTs,
+          replyToMode: params.replyToMode,
+          hasRepliedRef: params.hasRepliedRef,
+          modelHasVision,
+        });
     const tools = sanitizeToolsForGoogle({ tools: toolsRaw, provider: params.provider });
     logToolSchemasForGoogle({ tools, provider: params.provider });
 
@@ -237,14 +265,25 @@ export async function runEmbeddedAttempt(
       }
     }
     const reactionGuidance =
-      runtimeChannel === "telegram" && params.config
+      runtimeChannel && params.config
         ? (() => {
-            const resolved = resolveTelegramReactionLevel({
-              cfg: params.config,
-              accountId: params.agentAccountId ?? undefined,
-            });
-            const level = resolved.agentReactionGuidance;
-            return level ? { level, channel: "Telegram" } : undefined;
+            if (runtimeChannel === "telegram") {
+              const resolved = resolveTelegramReactionLevel({
+                cfg: params.config,
+                accountId: params.agentAccountId ?? undefined,
+              });
+              const level = resolved.agentReactionGuidance;
+              return level ? { level, channel: "Telegram" } : undefined;
+            }
+            if (runtimeChannel === "signal") {
+              const resolved = resolveSignalReactionLevel({
+                cfg: params.config,
+                accountId: params.agentAccountId ?? undefined,
+              });
+              const level = resolved.agentReactionGuidance;
+              return level ? { level, channel: "Signal" } : undefined;
+            }
+            return undefined;
           })()
         : undefined;
     const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
@@ -260,6 +299,13 @@ export async function runEmbeddedAttempt(
           channel: runtimeChannel,
         })
       : undefined;
+    const messageToolHints = runtimeChannel
+      ? resolveChannelMessageToolHints({
+          cfg: params.config,
+          channel: runtimeChannel,
+          accountId: params.agentAccountId,
+        })
+      : undefined;
 
     const defaultModelRef = resolveDefaultModelForAgent({
       cfg: params.config ?? {},
@@ -269,6 +315,8 @@ export async function runEmbeddedAttempt(
     const { runtimeInfo, userTimezone, userTime, userTimeFormat } = buildSystemPromptParams({
       config: params.config,
       agentId: sessionAgentId,
+      workspaceDir: effectiveWorkspace,
+      cwd: process.cwd(),
       runtime: {
         host: machineName,
         os: `${os.type()} ${os.release()}`,
@@ -283,12 +331,13 @@ export async function runEmbeddedAttempt(
     });
     const isDefaultAgent = sessionAgentId === defaultAgentId;
     const promptMode = isSubagentSessionKey(params.sessionKey) ? "minimal" : "full";
-    const docsPath = await resolveClawdbotDocsPath({
+    const docsPath = await resolveOpenClawDocsPath({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
       cwd: process.cwd(),
       moduleUrl: import.meta.url,
     });
+    const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
 
     const appendPrompt = buildEmbeddedSystemPrompt({
       workspaceDir: effectiveWorkspace,
@@ -302,9 +351,12 @@ export async function runEmbeddedAttempt(
         : undefined,
       skillsPrompt,
       docsPath: docsPath ?? undefined,
+      ttsHint,
+      workspaceNotes,
       reactionGuidance,
       promptMode,
       runtimeInfo,
+      messageToolHints,
       sandboxInfo,
       tools,
       modelAliasLines: buildModelAliasLines(params.config),
@@ -349,10 +401,17 @@ export async function runEmbeddedAttempt(
         .then(() => true)
         .catch(() => false);
 
+      const transcriptPolicy = resolveTranscriptPolicy({
+        modelApi: params.model?.api,
+        provider: params.provider,
+        modelId: params.modelId,
+      });
+
       await prewarmSessionFile(params.sessionFile);
       sessionManager = guardSessionManager(SessionManager.open(params.sessionFile), {
         agentId: sessionAgentId,
         sessionKey: params.sessionKey,
+        allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
       });
       trackSessionManagerAccess(params.sessionFile);
 
@@ -393,6 +452,17 @@ export async function runEmbeddedAttempt(
 
       const allCustomTools = [...customTools, ...clientToolDefs];
 
+      const resourceLoader = new DefaultResourceLoader({
+        cwd: resolvedWorkspace,
+        agentDir,
+        settingsManager,
+        additionalExtensionPaths,
+        noSkills: true,
+        systemPromptOverride: () => systemPrompt(""),
+        agentsFilesOverride: () => ({ agentsFiles: [] }),
+      });
+      await resourceLoader.reload();
+
       ({ session } = await createAgentSession({
         cwd: resolvedWorkspace,
         agentDir,
@@ -400,14 +470,11 @@ export async function runEmbeddedAttempt(
         modelRegistry: params.modelRegistry,
         model: params.model,
         thinkingLevel: mapThinkingLevel(params.thinkLevel),
-        systemPrompt,
         tools: builtInTools,
         customTools: allCustomTools,
         sessionManager,
         settingsManager,
-        skills: [],
-        contextFiles: [],
-        additionalExtensionPaths,
+        resourceLoader,
       }));
       if (!session) {
         throw new Error("Embedded agent session missing");
@@ -415,6 +482,16 @@ export async function runEmbeddedAttempt(
       const activeSession = session;
       const cacheTrace = createCacheTrace({
         cfg: params.config,
+        env: process.env,
+        runId: params.runId,
+        sessionId: activeSession.sessionId,
+        sessionKey: params.sessionKey,
+        provider: params.provider,
+        modelId: params.modelId,
+        modelApi: params.model.api,
+        workspaceDir: params.workspaceDir,
+      });
+      const anthropicPayloadLogger = createAnthropicPayloadLogger({
         env: process.env,
         runId: params.runId,
         sessionId: activeSession.sessionId,
@@ -444,6 +521,11 @@ export async function runEmbeddedAttempt(
         });
         activeSession.agent.streamFn = cacheTrace.wrapStreamFn(activeSession.agent.streamFn);
       }
+      if (anthropicPayloadLogger) {
+        activeSession.agent.streamFn = anthropicPayloadLogger.wrapStreamFn(
+          activeSession.agent.streamFn,
+        );
+      }
 
       try {
         const prior = await sanitizeSessionHistory({
@@ -453,10 +535,15 @@ export async function runEmbeddedAttempt(
           provider: params.provider,
           sessionManager,
           sessionId: params.sessionId,
+          policy: transcriptPolicy,
         });
         cacheTrace?.recordStage("session:sanitized", { messages: prior });
-        const validatedGemini = validateGeminiTurns(prior);
-        const validated = validateAnthropicTurns(validatedGemini);
+        const validatedGemini = transcriptPolicy.validateGeminiTurns
+          ? validateGeminiTurns(prior)
+          : prior;
+        const validated = transcriptPolicy.validateAnthropicTurns
+          ? validateAnthropicTurns(validatedGemini)
+          : validatedGemini;
         const limited = limitHistoryTurns(
           validated,
           getDmHistoryLimitFromSessionKey(params.sessionKey, params.config),
@@ -562,18 +649,23 @@ export async function runEmbeddedAttempt(
       setActiveEmbeddedRun(params.sessionId, queueHandle);
 
       let abortWarnTimer: NodeJS.Timeout | undefined;
+      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
       const abortTimer = setTimeout(
         () => {
-          log.warn(
-            `embedded run timeout: runId=${params.runId} sessionId=${params.sessionId} timeoutMs=${params.timeoutMs}`,
-          );
+          if (!isProbeSession) {
+            log.warn(
+              `embedded run timeout: runId=${params.runId} sessionId=${params.sessionId} timeoutMs=${params.timeoutMs}`,
+            );
+          }
           abortRun(true);
           if (!abortWarnTimer) {
             abortWarnTimer = setTimeout(() => {
               if (!activeSession.isStreaming) return;
-              log.warn(
-                `embedded run abort still streaming: runId=${params.runId} sessionId=${params.sessionId}`,
-              );
+              if (!isProbeSession) {
+                log.warn(
+                  `embedded run abort still streaming: runId=${params.runId} sessionId=${params.sessionId}`,
+                );
+              }
             }, 10_000);
           }
         },
@@ -728,6 +820,7 @@ export async function runEmbeddedAttempt(
           messages: messagesSnapshot,
           note: promptError ? "prompt error" : undefined,
         });
+        anthropicPayloadLogger?.recordUsage(messagesSnapshot, promptError);
 
         // Run agent_end hooks to allow plugins to analyze the conversation
         // This is fire-and-forget, so we don't await

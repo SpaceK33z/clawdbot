@@ -1,8 +1,11 @@
+import fs from "node:fs";
 import path from "node:path";
 
-import { discoverClawdbotPlugins } from "../../plugins/discovery.js";
+import { MANIFEST_KEY } from "../../compat/legacy-names.js";
+import { discoverOpenClawPlugins } from "../../plugins/discovery.js";
 import type { PluginOrigin } from "../../plugins/types.js";
-import type { ClawdbotPackageManifest } from "../../plugins/manifest.js";
+import type { OpenClawPackageManifest } from "../../plugins/manifest.js";
+import { CONFIG_DIR, resolveUserPath } from "../../utils.js";
 import type { ChannelMeta } from "./types.js";
 
 export type ChannelUiMetaEntry = {
@@ -33,6 +36,7 @@ export type ChannelPluginCatalogEntry = {
 
 type CatalogOptions = {
   workspaceDir?: string;
+  catalogPaths?: string[];
 };
 
 const ORIGIN_PRIORITY: Record<PluginOrigin, number> = {
@@ -42,8 +46,77 @@ const ORIGIN_PRIORITY: Record<PluginOrigin, number> = {
   bundled: 3,
 };
 
+type ExternalCatalogEntry = {
+  name?: string;
+  version?: string;
+  description?: string;
+} & Partial<Record<ManifestKey, OpenClawPackageManifest>>;
+
+const DEFAULT_CATALOG_PATHS = [
+  path.join(CONFIG_DIR, "mpm", "plugins.json"),
+  path.join(CONFIG_DIR, "mpm", "catalog.json"),
+  path.join(CONFIG_DIR, "plugins", "catalog.json"),
+];
+
+const ENV_CATALOG_PATHS = ["OPENCLAW_PLUGIN_CATALOG_PATHS", "OPENCLAW_MPM_CATALOG_PATHS"];
+
+type ManifestKey = typeof MANIFEST_KEY;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseCatalogEntries(raw: unknown): ExternalCatalogEntry[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((entry): entry is ExternalCatalogEntry => isRecord(entry));
+  }
+  if (!isRecord(raw)) return [];
+  const list = raw.entries ?? raw.packages ?? raw.plugins;
+  if (!Array.isArray(list)) return [];
+  return list.filter((entry): entry is ExternalCatalogEntry => isRecord(entry));
+}
+
+function splitEnvPaths(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/[;,]/g)
+    .flatMap((chunk) => chunk.split(path.delimiter))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function resolveExternalCatalogPaths(options: CatalogOptions): string[] {
+  if (options.catalogPaths && options.catalogPaths.length > 0) {
+    return options.catalogPaths.map((entry) => entry.trim()).filter(Boolean);
+  }
+  for (const key of ENV_CATALOG_PATHS) {
+    const raw = process.env[key];
+    if (raw && raw.trim()) {
+      return splitEnvPaths(raw);
+    }
+  }
+  return DEFAULT_CATALOG_PATHS;
+}
+
+function loadExternalCatalogEntries(options: CatalogOptions): ExternalCatalogEntry[] {
+  const paths = resolveExternalCatalogPaths(options);
+  const entries: ExternalCatalogEntry[] = [];
+  for (const rawPath of paths) {
+    const resolved = resolveUserPath(rawPath);
+    if (!fs.existsSync(resolved)) continue;
+    try {
+      const payload = JSON.parse(fs.readFileSync(resolved, "utf-8")) as unknown;
+      entries.push(...parseCatalogEntries(payload));
+    } catch {
+      // Ignore invalid catalog files.
+    }
+  }
+  return entries;
+}
+
 function toChannelMeta(params: {
-  channel: NonNullable<ClawdbotPackageManifest["channel"]>;
+  channel: NonNullable<OpenClawPackageManifest["channel"]>;
   id: string;
 }): ChannelMeta | null {
   const label = params.channel.label?.trim();
@@ -91,7 +164,7 @@ function toChannelMeta(params: {
 }
 
 function resolveInstallInfo(params: {
-  manifest: ClawdbotPackageManifest;
+  manifest: OpenClawPackageManifest;
   packageName?: string;
   packageDir?: string;
   workspaceDir?: string;
@@ -114,9 +187,9 @@ function buildCatalogEntry(candidate: {
   packageName?: string;
   packageDir?: string;
   workspaceDir?: string;
-  packageClawdbot?: ClawdbotPackageManifest;
+  packageManifest?: OpenClawPackageManifest;
 }): ChannelPluginCatalogEntry | null {
-  const manifest = candidate.packageClawdbot;
+  const manifest = candidate.packageManifest;
   if (!manifest?.channel) return null;
   const id = manifest.channel.id?.trim();
   if (!id) return null;
@@ -130,6 +203,14 @@ function buildCatalogEntry(candidate: {
   });
   if (!install) return null;
   return { id, meta, install };
+}
+
+function buildExternalCatalogEntry(entry: ExternalCatalogEntry): ChannelPluginCatalogEntry | null {
+  const manifest = entry[MANIFEST_KEY];
+  return buildCatalogEntry({
+    packageName: entry.name,
+    packageManifest: manifest,
+  });
 }
 
 export function buildChannelUiCatalog(
@@ -163,7 +244,7 @@ export function buildChannelUiCatalog(
 export function listChannelPluginCatalogEntries(
   options: CatalogOptions = {},
 ): ChannelPluginCatalogEntry[] {
-  const discovery = discoverClawdbotPlugins({ workspaceDir: options.workspaceDir });
+  const discovery = discoverOpenClawPlugins({ workspaceDir: options.workspaceDir });
   const resolved = new Map<string, { entry: ChannelPluginCatalogEntry; priority: number }>();
 
   for (const candidate of discovery.candidates) {
@@ -173,6 +254,15 @@ export function listChannelPluginCatalogEntries(
     const existing = resolved.get(entry.id);
     if (!existing || priority < existing.priority) {
       resolved.set(entry.id, { entry, priority });
+    }
+  }
+
+  const externalEntries = loadExternalCatalogEntries(options)
+    .map((entry) => buildExternalCatalogEntry(entry))
+    .filter((entry): entry is ChannelPluginCatalogEntry => Boolean(entry));
+  for (const entry of externalEntries) {
+    if (!resolved.has(entry.id)) {
+      resolved.set(entry.id, { entry, priority: 99 });
     }
   }
 

@@ -13,7 +13,7 @@ import {
   normalizeUsageDisplay,
   supportsXHighThinking,
 } from "../auto-reply/thinking.js";
-import type { ClawdbotConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { applyVerboseOverride, parseVerboseOverride } from "../sessions/level-overrides.js";
@@ -56,7 +56,7 @@ function normalizeExecAsk(raw: string): "off" | "on-miss" | "always" | undefined
 }
 
 export async function applySessionsPatchToStore(params: {
-  cfg: ClawdbotConfig;
+  cfg: OpenClawConfig;
   store: Record<string, SessionEntry>;
   storeKey: string;
   patch: SessionsPatchParams;
@@ -169,7 +169,7 @@ export async function applySessionsPatchToStore(params: {
       delete next.elevatedLevel;
     } else if (raw !== undefined) {
       const normalized = normalizeElevatedLevel(String(raw));
-      if (!normalized) return invalid('invalid elevatedLevel (use "on"|"off")');
+      if (!normalized) return invalid('invalid elevatedLevel (use "on"|"off"|"ask"|"full")');
       // Persist "off" explicitly so patches can override defaults.
       next.elevatedLevel = normalized;
     }

@@ -1,4 +1,4 @@
-import type { ClawdbotConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import { applyAuthChoiceAnthropic } from "./auth-choice.apply.anthropic.js";
@@ -15,16 +15,20 @@ import type { AuthChoice } from "./onboard-types.js";
 
 export type ApplyAuthChoiceParams = {
   authChoice: AuthChoice;
-  config: ClawdbotConfig;
+  config: OpenClawConfig;
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
   agentDir?: string;
   setDefaultModel: boolean;
   agentId?: string;
+  opts?: {
+    tokenProvider?: string;
+    token?: string;
+  };
 };
 
 export type ApplyAuthChoiceResult = {
-  config: ClawdbotConfig;
+  config: OpenClawConfig;
   agentModelOverride?: string;
 };
 

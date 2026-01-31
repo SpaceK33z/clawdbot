@@ -3,12 +3,12 @@ summary: "Pairing overview: approve who can DM you + which nodes can join"
 read_when:
   - Setting up DM access control
   - Pairing a new iOS/Android node
-  - Reviewing Clawdbot security posture
+  - Reviewing OpenClaw security posture
 ---
 
 # Pairing
 
-“Pairing” is Clawdbot’s explicit **owner approval** step.
+“Pairing” is OpenClaw’s explicit **owner approval** step.
 It is used in two places:
 
 1) **DM pairing** (who is allowed to talk to the bot)
@@ -30,42 +30,44 @@ Pairing codes:
 ### Approve a sender
 
 ```bash
-clawdbot pairing list telegram
-clawdbot pairing approve telegram <CODE>
+openclaw pairing list telegram
+openclaw pairing approve telegram <CODE>
 ```
 
 Supported channels: `telegram`, `whatsapp`, `signal`, `imessage`, `discord`, `slack`.
 
 ### Where the state lives
 
-Stored under `~/.clawdbot/credentials/`:
+Stored under `~/.openclaw/credentials/`:
 - Pending requests: `<channel>-pairing.json`
 - Approved allowlist store: `<channel>-allowFrom.json`
 
 Treat these as sensitive (they gate access to your assistant).
 
 
-## 2) Node pairing (iOS/Android nodes joining the gateway)
+## 2) Node device pairing (iOS/Android/macOS/headless nodes)
 
-Nodes (iOS/Android, future hardware, etc.) connect to the Gateway and request to join.
-The Gateway keeps an authoritative allowlist; new nodes require explicit approve/reject.
+Nodes connect to the Gateway as **devices** with `role: node`. The Gateway
+creates a device pairing request that must be approved.
 
-### Approve a node
+### Approve a node device
 
 ```bash
-clawdbot nodes pending
-clawdbot nodes approve <requestId>
+openclaw devices list
+openclaw devices approve <requestId>
+openclaw devices reject <requestId>
 ```
 
 ### Where the state lives
 
-Stored under `~/.clawdbot/nodes/`:
+Stored under `~/.openclaw/devices/`:
 - `pending.json` (short-lived; pending requests expire)
-- `paired.json` (paired nodes + tokens)
+- `paired.json` (paired devices + tokens)
 
-### Details
+### Notes
 
-Full protocol + design notes: [Gateway pairing](/gateway/pairing)
+- The legacy `node.pair.*` API (CLI: `openclaw nodes pending/approve`) is a
+  separate gateway-owned pairing store. WS nodes still require device pairing.
 
 
 ## Related docs

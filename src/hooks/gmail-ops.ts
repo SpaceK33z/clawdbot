@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 
 import {
-  type ClawdbotConfig,
-  CONFIG_PATH_CLAWDBOT,
+  type OpenClawConfig,
+  CONFIG_PATH,
   loadConfig,
   readConfigFileSnapshot,
   resolveGatewayPort,
@@ -12,6 +12,7 @@ import {
 import { runCommandWithTimeout } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
 import { formatCliCommand } from "../cli/command-format.js";
+import { displayPath } from "../utils.js";
 import {
   buildDefaultHookUrl,
   buildGogWatchServeArgs,
@@ -98,7 +99,7 @@ export async function runGmailSetup(opts: GmailSetupOptions) {
 
   const configSnapshot = await readConfigFileSnapshot();
   if (!configSnapshot.valid) {
-    throw new Error(`Config invalid: ${CONFIG_PATH_CLAWDBOT}`);
+    throw new Error(`Config invalid: ${CONFIG_PATH}`);
   }
 
   const baseConfig = configSnapshot.config;
@@ -209,7 +210,7 @@ export async function runGmailSetup(opts: GmailSetupOptions) {
     true,
   );
 
-  const nextConfig: ClawdbotConfig = {
+  const nextConfig: OpenClawConfig = {
     ...baseConfig,
     hooks: {
       ...baseConfig.hooks,
@@ -276,8 +277,8 @@ export async function runGmailSetup(opts: GmailSetupOptions) {
   defaultRuntime.log(`- subscription: ${subscription}`);
   defaultRuntime.log(`- push endpoint: ${pushEndpoint}`);
   defaultRuntime.log(`- hook url: ${hookUrl}`);
-  defaultRuntime.log(`- config: ${CONFIG_PATH_CLAWDBOT}`);
-  defaultRuntime.log(`Next: ${formatCliCommand("clawdbot webhooks gmail run")}`);
+  defaultRuntime.log(`- config: ${displayPath(CONFIG_PATH)}`);
+  defaultRuntime.log(`Next: ${formatCliCommand("openclaw webhooks gmail run")}`);
 }
 
 export async function runGmailService(opts: GmailRunOptions) {

@@ -3,8 +3,11 @@ summary: "Cron jobs + wakeups for the Gateway scheduler"
 read_when:
   - Scheduling background jobs or wakeups
   - Wiring automation that should run with or alongside heartbeats
+  - Deciding between heartbeat and cron for scheduled tasks
 ---
 # Cron jobs (Gateway scheduler)
+
+> **Cron vs Heartbeat?** See [Cron vs Heartbeat](/automation/cron-vs-heartbeat) for guidance on when to use each.
 
 Cron is the Gateway’s built-in scheduler. It persists jobs, wakes the agent at
 the right time, and can optionally deliver output back to a chat.
@@ -14,7 +17,7 @@ cron is the mechanism.
 
 ## TL;DR
 - Cron runs **inside the Gateway** (not inside the model).
-- Jobs persist under `~/.clawdbot/cron/` so restarts don’t lose schedules.
+- Jobs persist under `~/.openclaw/cron/` so restarts don’t lose schedules.
 - Two execution styles:
   - **Main session**: enqueue a system event, then run on the next heartbeat.
   - **Isolated**: run a dedicated agent turn in `cron:<jobId>`, optionally deliver output.
@@ -121,7 +124,7 @@ Resolution priority:
 
 ### Delivery (channel + target)
 Isolated jobs can deliver output to a channel. The job payload can specify:
-- `channel`: `whatsapp` / `telegram` / `discord` / `slack` / `signal` / `imessage` / `last`
+- `channel`: `whatsapp` / `telegram` / `discord` / `slack` / `mattermost` (plugin) / `signal` / `imessage` / `last`
 - `to`: channel-specific recipient target
 
 If `channel` or `to` is omitted, cron can fall back to the main session’s “last route”
@@ -133,7 +136,7 @@ Delivery notes:
 - Use `deliver: false` to keep output internal even if a `to` is present.
 
 Target format reminders:
-- Slack/Discord targets should use explicit prefixes (e.g. `channel:<id>`, `user:<id>`) to avoid ambiguity.
+- Slack/Discord/Mattermost (plugin) targets should use explicit prefixes (e.g. `channel:<id>`, `user:<id>`) to avoid ambiguity.
 - Telegram topics should use the `:topic:` form (see below).
 
 #### Telegram delivery targets (topics / forum threads)
@@ -148,8 +151,8 @@ Prefixed targets like `telegram:...` / `telegram:group:...` are also accepted:
 - `telegram:group:-1001234567890:topic:123`
 
 ## Storage & history
-- Job store: `~/.clawdbot/cron/jobs.json` (Gateway-managed JSON).
-- Run history: `~/.clawdbot/cron/runs/<jobId>.jsonl` (JSONL, auto-pruned).
+- Job store: `~/.openclaw/cron/jobs.json` (Gateway-managed JSON).
+- Run history: `~/.openclaw/cron/runs/<jobId>.jsonl` (JSONL, auto-pruned).
 - Override store path: `cron.store` in config.
 
 ## Configuration
@@ -158,7 +161,7 @@ Prefixed targets like `telegram:...` / `telegram:group:...` are also accepted:
 {
   cron: {
     enabled: true, // default true
-    store: "~/.clawdbot/cron/jobs.json",
+    store: "~/.openclaw/cron/jobs.json",
     maxConcurrentRuns: 1 // default 1
   }
 }
@@ -166,13 +169,13 @@ Prefixed targets like `telegram:...` / `telegram:group:...` are also accepted:
 
 Disable cron entirely:
 - `cron.enabled: false` (config)
-- `CLAWDBOT_SKIP_CRON=1` (env)
+- `OPENCLAW_SKIP_CRON=1` (env)
 
 ## CLI quickstart
 
 One-shot reminder (UTC ISO, auto-delete after success):
 ```bash
-clawdbot cron add \
+openclaw cron add \
   --name "Send reminder" \
   --at "2026-01-12T18:00:00Z" \
   --session main \
@@ -183,7 +186,7 @@ clawdbot cron add \
 
 One-shot reminder (main session, wake immediately):
 ```bash
-clawdbot cron add \
+openclaw cron add \
   --name "Calendar check" \
   --at "20m" \
   --session main \
@@ -193,7 +196,7 @@ clawdbot cron add \
 
 Recurring isolated job (deliver to WhatsApp):
 ```bash
-clawdbot cron add \
+openclaw cron add \
   --name "Morning status" \
   --cron "0 7 * * *" \
   --tz "America/Los_Angeles" \
@@ -206,7 +209,7 @@ clawdbot cron add \
 
 Recurring isolated job (deliver to a Telegram topic):
 ```bash
-clawdbot cron add \
+openclaw cron add \
   --name "Nightly summary (topic)" \
   --cron "0 22 * * *" \
   --tz "America/Los_Angeles" \
@@ -219,7 +222,7 @@ clawdbot cron add \
 
 Isolated job with model and thinking override:
 ```bash
-clawdbot cron add \
+openclaw cron add \
   --name "Deep analysis" \
   --cron "0 6 * * 1" \
   --tz "America/Los_Angeles" \
@@ -234,22 +237,22 @@ clawdbot cron add \
 Agent selection (multi-agent setups):
 ```bash
 # Pin a job to agent "ops" (falls back to default if that agent is missing)
-clawdbot cron add --name "Ops sweep" --cron "0 6 * * *" --session isolated --message "Check ops queue" --agent ops
+openclaw cron add --name "Ops sweep" --cron "0 6 * * *" --session isolated --message "Check ops queue" --agent ops
 
 # Switch or clear the agent on an existing job
-clawdbot cron edit <jobId> --agent ops
-clawdbot cron edit <jobId> --clear-agent
+openclaw cron edit <jobId> --agent ops
+openclaw cron edit <jobId> --clear-agent
 ```
 ```
 
 Manual run (debug):
 ```bash
-clawdbot cron run <jobId> --force
+openclaw cron run <jobId> --force
 ```
 
 Edit an existing job (patch fields):
 ```bash
-clawdbot cron edit <jobId> \
+openclaw cron edit <jobId> \
   --message "Updated prompt" \
   --model "opus" \
   --thinking low
@@ -257,23 +260,23 @@ clawdbot cron edit <jobId> \
 
 Run history:
 ```bash
-clawdbot cron runs --id <jobId> --limit 50
+openclaw cron runs --id <jobId> --limit 50
 ```
 
-Immediate wake without creating a job:
+Immediate system event without creating a job:
 ```bash
-clawdbot wake --mode now --text "Next heartbeat: check battery."
+openclaw system event --mode now --text "Next heartbeat: check battery."
 ```
 
 ## Gateway API surface
 - `cron.list`, `cron.status`, `cron.add`, `cron.update`, `cron.remove`
 - `cron.run` (force or due), `cron.runs`
-- `wake` (enqueue system event + optional heartbeat)
+For immediate system events without a job, use [`openclaw system event`](/cli/system).
 
 ## Troubleshooting
 
 ### “Nothing runs”
-- Check cron is enabled: `cron.enabled` and `CLAWDBOT_SKIP_CRON`.
+- Check cron is enabled: `cron.enabled` and `OPENCLAW_SKIP_CRON`.
 - Check the Gateway is running continuously (cron runs inside the Gateway process).
 - For `cron` schedules: confirm timezone (`--tz`) vs the host timezone.
 

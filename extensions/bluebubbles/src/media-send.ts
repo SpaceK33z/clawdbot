@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveChannelMediaMaxBytes, type ClawdbotConfig } from "clawdbot/plugin-sdk";
+import { resolveChannelMediaMaxBytes, type OpenClawConfig } from "openclaw/plugin-sdk";
 
 import { sendBlueBubblesAttachment } from "./attachments.js";
 import { resolveBlueBubblesMessageId } from "./monitor.js";
@@ -49,7 +49,7 @@ function resolveFilenameFromSource(source?: string): string | undefined {
 }
 
 export async function sendBlueBubblesMedia(params: {
-  cfg: ClawdbotConfig;
+  cfg: OpenClawConfig;
   to: string;
   mediaUrl?: string;
   mediaPath?: string;
@@ -59,6 +59,7 @@ export async function sendBlueBubblesMedia(params: {
   caption?: string;
   replyToId?: string | null;
   accountId?: string;
+  asVoice?: boolean;
 }) {
   const {
     cfg,
@@ -71,6 +72,7 @@ export async function sendBlueBubblesMedia(params: {
     caption,
     replyToId,
     accountId,
+    asVoice,
   } = params;
   const core = getBlueBubblesRuntime();
   const maxBytes = resolveChannelMediaMaxBytes({
@@ -146,6 +148,7 @@ export async function sendBlueBubblesMedia(params: {
     filename: resolvedFilename ?? "attachment",
     contentType: resolvedContentType ?? undefined,
     replyToMessageGuid,
+    asVoice,
     opts: {
       cfg,
       accountId,

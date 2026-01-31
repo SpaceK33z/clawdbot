@@ -1,7 +1,7 @@
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { formatCliCommand } from "../../cli/command-format.js";
 import type { ChannelId, ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import { deliveryContextFromSession } from "../../utils/delivery-context.js";
@@ -27,6 +27,12 @@ export type OutboundTarget = {
   accountId?: string;
   lastChannel?: DeliverableMessageChannel;
   lastAccountId?: string;
+};
+
+export type HeartbeatSenderContext = {
+  sender: string;
+  provider?: DeliverableMessageChannel;
+  allowFrom: string[];
 };
 
 export type OutboundTargetResolution = { ok: true; to: string } | { ok: false; error: Error };
@@ -113,7 +119,7 @@ export function resolveOutboundTarget(params: {
   channel: GatewayMessageChannel;
   to?: string;
   allowFrom?: string[];
-  cfg?: ClawdbotConfig;
+  cfg?: OpenClawConfig;
   accountId?: string | null;
   mode?: ChannelOutboundTargetMode;
 }): OutboundTargetResolution {
@@ -121,7 +127,7 @@ export function resolveOutboundTarget(params: {
     return {
       ok: false,
       error: new Error(
-        `Delivering to WebChat is not supported via \`${formatCliCommand("clawdbot agent")}\`; use WhatsApp/Telegram or run with --deliver=false.`,
+        `Delivering to WebChat is not supported via \`${formatCliCommand("openclaw agent")}\`; use WhatsApp/Telegram or run with --deliver=false.`,
       ),
     };
   }
@@ -166,7 +172,7 @@ export function resolveOutboundTarget(params: {
 }
 
 export function resolveHeartbeatDeliveryTarget(params: {
-  cfg: ClawdbotConfig;
+  cfg: OpenClawConfig;
   entry?: SessionEntry;
   heartbeat?: AgentDefaultsConfig["heartbeat"];
 }): OutboundTarget {
@@ -249,4 +255,60 @@ export function resolveHeartbeatDeliveryTarget(params: {
     lastChannel: resolvedTarget.lastChannel,
     lastAccountId: resolvedTarget.lastAccountId,
   };
+}
+
+function resolveHeartbeatSenderId(params: {
+  allowFrom: Array<string | number>;
+  deliveryTo?: string;
+  lastTo?: string;
+  provider?: string | null;
+}) {
+  const { allowFrom, deliveryTo, lastTo, provider } = params;
+  const candidates = [
+    deliveryTo?.trim(),
+    provider && deliveryTo ? `${provider}:${deliveryTo}` : undefined,
+    lastTo?.trim(),
+    provider && lastTo ? `${provider}:${lastTo}` : undefined,
+  ].filter((val): val is string => Boolean(val?.trim()));
+
+  const allowList = allowFrom
+    .map((entry) => String(entry))
+    .filter((entry) => entry && entry !== "*");
+  if (allowFrom.includes("*")) {
+    return candidates[0] ?? "heartbeat";
+  }
+  if (candidates.length > 0 && allowList.length > 0) {
+    const matched = candidates.find((candidate) => allowList.includes(candidate));
+    if (matched) return matched;
+  }
+  if (candidates.length > 0 && allowList.length === 0) {
+    return candidates[0];
+  }
+  if (allowList.length > 0) return allowList[0];
+  return candidates[0] ?? "heartbeat";
+}
+
+export function resolveHeartbeatSenderContext(params: {
+  cfg: OpenClawConfig;
+  entry?: SessionEntry;
+  delivery: OutboundTarget;
+}): HeartbeatSenderContext {
+  const provider =
+    params.delivery.channel !== "none" ? params.delivery.channel : params.delivery.lastChannel;
+  const allowFrom = provider
+    ? (getChannelPlugin(provider)?.config.resolveAllowFrom?.({
+        cfg: params.cfg,
+        accountId:
+          provider === params.delivery.lastChannel ? params.delivery.lastAccountId : undefined,
+      }) ?? [])
+    : [];
+
+  const sender = resolveHeartbeatSenderId({
+    allowFrom,
+    deliveryTo: params.delivery.to,
+    lastTo: params.entry?.lastTo,
+    provider,
+  });
+
+  return { sender, provider, allowFrom };
 }

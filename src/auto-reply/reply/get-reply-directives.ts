@@ -2,7 +2,7 @@ import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import type { ModelAliasIndex } from "../../agents/model-selection.js";
 import type { SkillCommandSpec } from "../../agents/skills.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { listChatCommands, shouldHandleTextCommands } from "../commands-registry.js";
 import { listSkillCommandsForWorkspace } from "../skill-commands.js";
@@ -21,7 +21,7 @@ import { formatElevatedUnavailableMessage, resolveElevatedPermissions } from "./
 import { stripInlineStatus } from "./reply-inline.js";
 import type { TypingController } from "./typing.js";
 
-type AgentDefaults = NonNullable<ClawdbotConfig["agents"]>["defaults"];
+type AgentDefaults = NonNullable<OpenClawConfig["agents"]>["defaults"];
 type ExecOverrides = Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
 
 export type ReplyDirectiveContinuation = {
@@ -83,14 +83,14 @@ export type ReplyDirectiveResult =
 
 export async function resolveReplyDirectives(params: {
   ctx: MsgContext;
-  cfg: ClawdbotConfig;
+  cfg: OpenClawConfig;
   agentId: string;
   agentDir: string;
   workspaceDir: string;
   agentCfg: AgentDefaults;
   sessionCtx: TemplateContext;
-  sessionEntry?: SessionEntry;
-  sessionStore?: Record<string, SessionEntry>;
+  sessionEntry: SessionEntry;
+  sessionStore: Record<string, SessionEntry>;
   sessionKey: string;
   storePath?: string;
   sessionScope: Parameters<typeof applyInlineDirectiveOverrides>[0]["sessionScope"];
@@ -379,6 +379,7 @@ export async function resolveReplyDirectives(params: {
     sessionEntry,
     sessionStore,
     sessionKey,
+    parentSessionKey: ctx.ParentSessionKey,
     storePath,
     defaultProvider,
     defaultModel,

@@ -1,13 +1,13 @@
 ---
 summary: "Plugin manifest + JSON schema requirements (strict config validation)"
 read_when:
-  - You are building a Clawdbot plugin
+  - You are building a OpenClaw plugin
   - You need to ship a plugin config schema or debug plugin validation errors
 ---
-# Plugin manifest (clawdbot.plugin.json)
+# Plugin manifest (openclaw.plugin.json)
 
-Every plugin **must** ship a `clawdbot.plugin.json` file in the **plugin root**.
-Clawdbot uses this manifest to validate configuration **without executing plugin
+Every plugin **must** ship a `openclaw.plugin.json` file in the **plugin root**.
+OpenClaw uses this manifest to validate configuration **without executing plugin
 code**. Missing or invalid manifests are treated as plugin errors and block
 config validation.
 
@@ -34,6 +34,7 @@ Optional keys:
 - `kind` (string): plugin kind (example: `"memory"`).
 - `channels` (array): channel ids registered by this plugin (example: `["matrix"]`).
 - `providers` (array): provider ids registered by this plugin.
+- `skills` (array): skill directories to load (relative to the plugin root).
 - `name` (string): display name for the plugin.
 - `description` (string): short plugin summary.
 - `uiHints` (object): config field labels/placeholders/sensitive flags for UI rendering.

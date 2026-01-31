@@ -12,11 +12,12 @@ import { setVerbose } from "../globals.js";
 import { withProgress, withProgressTotals } from "./progress.js";
 import { formatErrorMessage, withManager } from "./cli-utils.js";
 import { getMemorySearchManager, type MemorySearchManagerResult } from "../memory/index.js";
-import { listMemoryFiles } from "../memory/internal.js";
+import { listMemoryFiles, normalizeExtraMemoryPaths } from "../memory/internal.js";
 import { defaultRuntime } from "../runtime.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { colorize, isRich, theme } from "../terminal/theme.js";
 import { resolveStateDir } from "../config/paths.js";
+import { shortenHomeInString, shortenHomePath } from "../utils.js";
 
 type MemoryCommandOptions = {
   agent?: string;
@@ -44,11 +45,15 @@ type MemorySourceScan = {
 
 function formatSourceLabel(source: string, workspaceDir: string, agentId: string): string {
   if (source === "memory") {
-    return `memory (MEMORY.md + ${path.join(workspaceDir, "memory")}${path.sep}*.md)`;
+    return shortenHomeInString(
+      `memory (MEMORY.md + ${path.join(workspaceDir, "memory")}${path.sep}*.md)`,
+    );
   }
   if (source === "sessions") {
     const stateDir = resolveStateDir(process.env, os.homedir);
-    return `sessions (${path.join(stateDir, "agents", agentId, "sessions")}${path.sep}*.jsonl)`;
+    return shortenHomeInString(
+      `sessions (${path.join(stateDir, "agents", agentId, "sessions")}${path.sep}*.jsonl)`,
+    );
   }
   return source;
 }
@@ -69,6 +74,10 @@ function resolveAgentIds(cfg: ReturnType<typeof loadConfig>, agent?: string): st
   return [resolveDefaultAgentId(cfg)];
 }
 
+function formatExtraPaths(workspaceDir: string, extraPaths: string[]): string[] {
+  return normalizeExtraMemoryPaths(workspaceDir, extraPaths).map((entry) => shortenHomePath(entry));
+}
+
 async function checkReadableFile(pathname: string): Promise<{ exists: boolean; issue?: string }> {
   try {
     await fs.access(pathname, fsSync.constants.R_OK);
@@ -76,7 +85,10 @@ async function checkReadableFile(pathname: string): Promise<{ exists: boolean; i
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { exists: false };
-    return { exists: true, issue: `${pathname} not readable (${code ?? "error"})` };
+    return {
+      exists: true,
+      issue: `${shortenHomePath(pathname)} not readable (${code ?? "error"})`,
+    };
   }
 }
 
@@ -92,15 +104,20 @@ async function scanSessionFiles(agentId: string): Promise<SourceScan> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      issues.push(`sessions directory missing (${sessionsDir})`);
+      issues.push(`sessions directory missing (${shortenHomePath(sessionsDir)})`);
       return { source: "sessions", totalFiles: 0, issues };
     }
-    issues.push(`sessions directory not accessible (${sessionsDir}): ${code ?? "error"}`);
+    issues.push(
+      `sessions directory not accessible (${shortenHomePath(sessionsDir)}): ${code ?? "error"}`,
+    );
     return { source: "sessions", totalFiles: null, issues };
   }
 }
 
-async function scanMemoryFiles(workspaceDir: string): Promise<SourceScan> {
+async function scanMemoryFiles(
+  workspaceDir: string,
+  extraPaths: string[] = [],
+): Promise<SourceScan> {
   const issues: string[] = [];
   const memoryFile = path.join(workspaceDir, "MEMORY.md");
   const altMemoryFile = path.join(workspaceDir, "memory.md");
@@ -111,6 +128,25 @@ async function scanMemoryFiles(workspaceDir: string): Promise<SourceScan> {
   if (primary.issue) issues.push(primary.issue);
   if (alt.issue) issues.push(alt.issue);
 
+  const resolvedExtraPaths = normalizeExtraMemoryPaths(workspaceDir, extraPaths);
+  for (const extraPath of resolvedExtraPaths) {
+    try {
+      const stat = await fs.lstat(extraPath);
+      if (stat.isSymbolicLink()) continue;
+      const extraCheck = await checkReadableFile(extraPath);
+      if (extraCheck.issue) issues.push(extraCheck.issue);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        issues.push(`additional memory path missing (${shortenHomePath(extraPath)})`);
+      } else {
+        issues.push(
+          `additional memory path not accessible (${shortenHomePath(extraPath)}): ${code ?? "error"}`,
+        );
+      }
+    }
+  }
+
   let dirReadable: boolean | null = null;
   try {
     await fs.access(memoryDir, fsSync.constants.R_OK);
@@ -118,10 +154,12 @@ async function scanMemoryFiles(workspaceDir: string): Promise<SourceScan> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      issues.push(`memory directory missing (${memoryDir})`);
+      issues.push(`memory directory missing (${shortenHomePath(memoryDir)})`);
       dirReadable = false;
     } else {
-      issues.push(`memory directory not accessible (${memoryDir}): ${code ?? "error"}`);
+      issues.push(
+        `memory directory not accessible (${shortenHomePath(memoryDir)}): ${code ?? "error"}`,
+      );
       dirReadable = null;
     }
   }
@@ -129,12 +167,14 @@ async function scanMemoryFiles(workspaceDir: string): Promise<SourceScan> {
   let listed: string[] = [];
   let listedOk = false;
   try {
-    listed = await listMemoryFiles(workspaceDir);
+    listed = await listMemoryFiles(workspaceDir, resolvedExtraPaths);
     listedOk = true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (dirReadable !== null) {
-      issues.push(`memory directory scan failed (${memoryDir}): ${code ?? "error"}`);
+      issues.push(
+        `memory directory scan failed (${shortenHomePath(memoryDir)}): ${code ?? "error"}`,
+      );
       dirReadable = null;
     }
   }
@@ -152,7 +192,7 @@ async function scanMemoryFiles(workspaceDir: string): Promise<SourceScan> {
   }
 
   if ((totalFiles ?? 0) === 0 && issues.length === 0) {
-    issues.push(`no memory files found in ${workspaceDir}`);
+    issues.push(`no memory files found in ${shortenHomePath(workspaceDir)}`);
   }
 
   return { source: "memory", totalFiles, issues };
@@ -162,11 +202,13 @@ async function scanMemorySources(params: {
   workspaceDir: string;
   agentId: string;
   sources: MemorySourceName[];
+  extraPaths?: string[];
 }): Promise<MemorySourceScan> {
   const scans: SourceScan[] = [];
+  const extraPaths = params.extraPaths ?? [];
   for (const source of params.sources) {
     if (source === "memory") {
-      scans.push(await scanMemoryFiles(params.workspaceDir));
+      scans.push(await scanMemoryFiles(params.workspaceDir, extraPaths));
     }
     if (source === "sessions") {
       scans.push(await scanSessionFiles(params.agentId));
@@ -254,6 +296,7 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
           workspaceDir: status.workspaceDir,
           agentId,
           sources,
+          extraPaths: status.extraPaths,
         });
         allResults.push({ agentId, status, embeddingProbe, indexError, scan });
       },
@@ -285,6 +328,7 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
       const line = indexError ? `Memory index failed: ${indexError}` : "Memory index complete.";
       defaultRuntime.log(line);
     }
+    const extraPaths = formatExtraPaths(status.workspaceDir, status.extraPaths ?? []);
     const lines = [
       `${heading("Memory Search")} ${muted(`(${agentId})`)}`,
       `${label("Provider")} ${info(status.provider)} ${muted(
@@ -292,10 +336,11 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
       )}`,
       `${label("Model")} ${info(status.model)}`,
       status.sources?.length ? `${label("Sources")} ${info(status.sources.join(", "))}` : null,
+      extraPaths.length ? `${label("Extra paths")} ${info(extraPaths.join(", "))}` : null,
       `${label("Indexed")} ${success(indexedLabel)}`,
       `${label("Dirty")} ${status.dirty ? warn("yes") : muted("no")}`,
-      `${label("Store")} ${info(status.dbPath)}`,
-      `${label("Workspace")} ${info(status.workspaceDir)}`,
+      `${label("Store")} ${info(shortenHomePath(status.dbPath))}`,
+      `${label("Workspace")} ${info(shortenHomePath(status.workspaceDir))}`,
     ].filter(Boolean) as string[];
     if (embeddingProbe) {
       const state = embeddingProbe.ok ? "ready" : "unavailable";
@@ -323,9 +368,11 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
     }
     if (status.vector) {
       const vectorState = status.vector.enabled
-        ? status.vector.available
-          ? "ready"
-          : "unavailable"
+        ? status.vector.available === undefined
+          ? "unknown"
+          : status.vector.available
+            ? "ready"
+            : "unavailable"
         : "disabled";
       const vectorColor =
         vectorState === "ready"
@@ -338,7 +385,7 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
         lines.push(`${label("Vector dims")} ${info(String(status.vector.dims))}`);
       }
       if (status.vector.extensionPath) {
-        lines.push(`${label("Vector path")} ${info(status.vector.extensionPath)}`);
+        lines.push(`${label("Vector path")} ${info(shortenHomePath(status.vector.extensionPath))}`);
       }
       if (status.vector.loadError) {
         lines.push(`${label("Vector error")} ${warn(status.vector.loadError)}`);
@@ -408,7 +455,7 @@ export function registerMemoryCli(program: Command) {
     .addHelpText(
       "after",
       () =>
-        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/memory", "docs.clawd.bot/cli/memory")}\n`,
+        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/memory", "docs.openclaw.ai/cli/memory")}\n`,
     );
 
   memory
@@ -453,6 +500,7 @@ export function registerMemoryCli(program: Command) {
                 const sourceLabels = status.sources.map((source) =>
                   formatSourceLabel(source, status.workspaceDir, agentId),
                 );
+                const extraPaths = formatExtraPaths(status.workspaceDir, status.extraPaths ?? []);
                 const lines = [
                   `${heading("Memory Index")} ${muted(`(${agentId})`)}`,
                   `${label("Provider")} ${info(status.provider)} ${muted(
@@ -461,6 +509,9 @@ export function registerMemoryCli(program: Command) {
                   `${label("Model")} ${info(status.model)}`,
                   sourceLabels.length
                     ? `${label("Sources")} ${info(sourceLabels.join(", "))}`
+                    : null,
+                  extraPaths.length
+                    ? `${label("Extra paths")} ${info(extraPaths.join(", "))}`
                     : null,
                 ].filter(Boolean) as string[];
                 if (status.fallback) {
@@ -592,7 +643,7 @@ export function registerMemoryCli(program: Command) {
                 `${colorize(rich, theme.success, result.score.toFixed(3))} ${colorize(
                   rich,
                   theme.accent,
-                  `${result.path}:${result.startLine}-${result.endLine}`,
+                  `${shortenHomePath(result.path)}:${result.startLine}-${result.endLine}`,
                 )}`,
               );
               lines.push(colorize(rich, theme.muted, result.snippet));

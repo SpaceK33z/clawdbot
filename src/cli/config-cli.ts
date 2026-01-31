@@ -7,6 +7,7 @@ import { defaultRuntime } from "../runtime.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { formatCliCommand } from "./command-format.js";
 import { theme } from "../terminal/theme.js";
+import { shortenHomePath } from "../utils.js";
 
 type PathSegment = string;
 
@@ -168,11 +169,11 @@ function unsetAtPath(root: Record<string, unknown>, path: PathSegment[]): boolea
 async function loadValidConfig() {
   const snapshot = await readConfigFileSnapshot();
   if (snapshot.valid) return snapshot;
-  defaultRuntime.error(`Config invalid at ${snapshot.path}.`);
+  defaultRuntime.error(`Config invalid at ${shortenHomePath(snapshot.path)}.`);
   for (const issue of snapshot.issues) {
     defaultRuntime.error(`- ${issue.path || "<root>"}: ${issue.message}`);
   }
-  defaultRuntime.error(`Run \`${formatCliCommand("clawdbot doctor")}\` to repair, then retry.`);
+  defaultRuntime.error(`Run \`${formatCliCommand("openclaw doctor")}\` to repair, then retry.`);
   defaultRuntime.exit(1);
   return snapshot;
 }
@@ -184,7 +185,7 @@ export function registerConfigCli(program: Command) {
     .addHelpText(
       "after",
       () =>
-        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/config", "docs.clawd.bot/cli/config")}\n`,
+        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/config", "docs.openclaw.ai/cli/config")}\n`,
     )
     .option(
       "--section <section>",

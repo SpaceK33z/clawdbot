@@ -2,11 +2,13 @@ import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway";
+import { resolveInjectedAssistantIdentity } from "./assistant-identity";
 import { loadSettings, type UiSettings } from "./storage";
 import { renderApp } from "./app-render";
 import type { Tab } from "./navigation";
 import type { ResolvedTheme, ThemeMode } from "./theme";
 import type {
+  AgentsListResult,
   ConfigSnapshot,
   ConfigUiHints,
   CronJob,
@@ -22,7 +24,7 @@ import type {
   StatusSummary,
   NostrProfile,
 } from "./types";
-import { type ChatQueueItem, type CronFormState } from "./ui-types";
+import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types";
 import type { EventLogEntry } from "./app-events";
 import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults";
 import type {
@@ -75,18 +77,31 @@ import {
   handleWhatsAppWait as handleWhatsAppWaitInternal,
 } from "./app-channels";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form";
+import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity";
 
 declare global {
   interface Window {
-    __CLAWDBOT_CONTROL_UI_BASE_PATH__?: string;
+    __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
   }
 }
 
-@customElement("clawdbot-app")
-export class ClawdbotApp extends LitElement {
+const injectedAssistantIdentity = resolveInjectedAssistantIdentity();
+
+function resolveOnboardingMode(): boolean {
+  if (!window.location.search) return false;
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("onboarding");
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+@customElement("openclaw-app")
+export class OpenClawApp extends LitElement {
   @state() settings: UiSettings = loadSettings();
   @state() password = "";
   @state() tab: Tab = "chat";
+  @state() onboarding = resolveOnboardingMode();
   @state() connected = false;
   @state() theme: ThemeMode = this.settings.theme ?? "system";
   @state() themeResolved: ResolvedTheme = "dark";
@@ -97,6 +112,10 @@ export class ClawdbotApp extends LitElement {
   private toolStreamSyncTimer: number | null = null;
   private sidebarCloseTimer: number | null = null;
 
+  @state() assistantName = injectedAssistantIdentity.name;
+  @state() assistantAvatar = injectedAssistantIdentity.avatar;
+  @state() assistantAgentId = injectedAssistantIdentity.agentId ?? null;
+
   @state() sessionKey = this.settings.sessionKey;
   @state() chatLoading = false;
   @state() chatSending = false;
@@ -106,8 +125,11 @@ export class ClawdbotApp extends LitElement {
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
   @state() chatRunId: string | null = null;
+  @state() compactionStatus: import("./app-tool-stream").CompactionStatus | null = null;
+  @state() chatAvatarUrl: string | null = null;
   @state() chatThinkingLevel: string | null = null;
   @state() chatQueue: ChatQueueItem[] = [];
+  @state() chatAttachments: ChatAttachment[] = [];
   // Sidebar state for tool output viewing
   @state() sidebarOpen = false;
   @state() sidebarContent: string | null = null;
@@ -130,9 +152,11 @@ export class ClawdbotApp extends LitElement {
   @state() execApprovalQueue: ExecApprovalRequest[] = [];
   @state() execApprovalBusy = false;
   @state() execApprovalError: string | null = null;
+  @state() pendingGatewayUrl: string | null = null;
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
+  @state() configRawOriginal = "";
   @state() configValid: boolean | null = null;
   @state() configIssues: unknown[] = [];
   @state() configSaving = false;
@@ -167,6 +191,10 @@ export class ClawdbotApp extends LitElement {
   @state() presenceEntries: PresenceEntry[] = [];
   @state() presenceError: string | null = null;
   @state() presenceStatus: string | null = null;
+
+  @state() agentsLoading = false;
+  @state() agentsList: AgentsListResult | null = null;
+  @state() agentsError: string | null = null;
 
   @state() sessionsLoading = false;
   @state() sessionsResult: SessionsListResult | null = null;
@@ -226,9 +254,11 @@ export class ClawdbotApp extends LitElement {
   private chatUserNearBottom = true;
   private nodesPollInterval: number | null = null;
   private logsPollInterval: number | null = null;
+  private debugPollInterval: number | null = null;
   private logsScrollFrame: number | null = null;
   private toolStreamById = new Map<string, ToolStreamEntry>();
   private toolStreamOrder: string[] = [];
+  refreshSessionsAfterChat = new Set<string>();
   basePath = "";
   private popStateHandler = () =>
     onPopStateInternal(
@@ -297,6 +327,10 @@ export class ClawdbotApp extends LitElement {
     resetChatScrollInternal(
       this as unknown as Parameters<typeof resetChatScrollInternal>[0],
     );
+  }
+
+  async loadAssistantIdentity() {
+    await loadAssistantIdentityInternal(this);
   }
 
   applySettings(next: UiSettings) {
@@ -414,6 +448,21 @@ export class ClawdbotApp extends LitElement {
     } finally {
       this.execApprovalBusy = false;
     }
+  }
+
+  handleGatewayUrlConfirm() {
+    const nextGatewayUrl = this.pendingGatewayUrl;
+    if (!nextGatewayUrl) return;
+    this.pendingGatewayUrl = null;
+    applySettingsInternal(
+      this as unknown as Parameters<typeof applySettingsInternal>[0],
+      { ...this.settings, gatewayUrl: nextGatewayUrl },
+    );
+    this.connect();
+  }
+
+  handleGatewayUrlCancel() {
+    this.pendingGatewayUrl = null;
   }
 
   // Sidebar handlers for tool output viewing

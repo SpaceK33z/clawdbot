@@ -7,7 +7,7 @@ read_when:
 ---
 # Network hub
 
-This hub links the core docs for how Clawdbot connects, pairs, and secures
+This hub links the core docs for how OpenClaw connects, pairs, and secures
 devices across localhost, LAN, and tailnet.
 
 ## Core model
@@ -36,7 +36,7 @@ Local trust:
 - [Remote access (SSH)](/gateway/remote)
 - [Tailscale](/gateway/tailscale)
 
-## Nodes + bridge
+## Nodes + transports
 
 - [Nodes overview](/nodes)
 - [Bridge protocol (legacy nodes)](/gateway/bridge-protocol)

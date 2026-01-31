@@ -1,11 +1,11 @@
-import type { AllowlistMatch, GroupPolicy } from "clawdbot/plugin-sdk";
+import type { AllowlistMatch, ChannelGroupContext, GroupPolicy, GroupToolPolicyConfig } from "openclaw/plugin-sdk";
 import {
   buildChannelKeyCandidates,
   normalizeChannelSlug,
   resolveChannelEntryMatchWithFallback,
   resolveMentionGatingWithBypass,
   resolveNestedAllowlistDecision,
-} from "clawdbot/plugin-sdk";
+} from "openclaw/plugin-sdk";
 
 import type { NextcloudTalkRoomConfig } from "./types.js";
 
@@ -84,6 +84,21 @@ export function resolveNextcloudTalkRoomMatch(params: {
     allowed,
     allowlistConfigured,
   };
+}
+
+export function resolveNextcloudTalkGroupToolPolicy(
+  params: ChannelGroupContext,
+): GroupToolPolicyConfig | undefined {
+  const cfg = params.cfg as { channels?: { "nextcloud-talk"?: { rooms?: Record<string, NextcloudTalkRoomConfig> } } };
+  const roomToken = params.groupId?.trim();
+  if (!roomToken) return undefined;
+  const roomName = params.groupChannel?.trim() || undefined;
+  const match = resolveNextcloudTalkRoomMatch({
+    rooms: cfg.channels?.["nextcloud-talk"]?.rooms,
+    roomToken,
+    roomName,
+  });
+  return match.roomConfig?.tools ?? match.wildcardConfig?.tools;
 }
 
 export function resolveNextcloudTalkRequireMention(params: {

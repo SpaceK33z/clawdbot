@@ -4,6 +4,7 @@ import type { UiSettings } from "./storage";
 import type { ThemeMode } from "./theme";
 import type { ThemeTransitionContext } from "./theme-transition";
 import type {
+  AgentsListResult,
   ChannelsStatusSnapshot,
   ConfigSnapshot,
   CronJob,
@@ -18,7 +19,7 @@ import type {
   SkillStatusReport,
   StatusSummary,
 } from "./types";
-import type { ChatQueueItem, CronFormState } from "./ui-types";
+import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types";
 import type { EventLogEntry } from "./app-events";
 import type { SkillMessage } from "./controllers/skills";
 import type {
@@ -33,6 +34,7 @@ export type AppViewState = {
   settings: UiSettings;
   password: string;
   tab: Tab;
+  onboarding: boolean;
   basePath: string;
   connected: boolean;
   theme: ThemeMode;
@@ -40,14 +42,19 @@ export type AppViewState = {
   hello: GatewayHelloOk | null;
   lastError: string | null;
   eventLog: EventLogEntry[];
+  assistantName: string;
+  assistantAvatar: string | null;
+  assistantAgentId: string | null;
   sessionKey: string;
   chatLoading: boolean;
   chatSending: boolean;
   chatMessage: string;
+  chatAttachments: ChatAttachment[];
   chatMessages: unknown[];
   chatToolMessages: unknown[];
   chatStream: string | null;
   chatRunId: string | null;
+  chatAvatarUrl: string | null;
   chatThinkingLevel: string | null;
   chatQueue: ChatQueueItem[];
   nodesLoading: boolean;
@@ -66,8 +73,10 @@ export type AppViewState = {
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalBusy: boolean;
   execApprovalError: string | null;
+  pendingGatewayUrl: string | null;
   configLoading: boolean;
   configRaw: string;
+  configRawOriginal: string;
   configValid: boolean | null;
   configIssues: unknown[];
   configSaving: boolean;
@@ -78,6 +87,7 @@ export type AppViewState = {
   configSchemaLoading: boolean;
   configUiHints: Record<string, unknown>;
   configForm: Record<string, unknown> | null;
+  configFormOriginal: Record<string, unknown> | null;
   configFormMode: "form" | "raw";
   channelsLoading: boolean;
   channelsSnapshot: ChannelsStatusSnapshot | null;
@@ -94,6 +104,9 @@ export type AppViewState = {
   presenceEntries: PresenceEntry[];
   presenceError: string | null;
   presenceStatus: string | null;
+  agentsLoading: boolean;
+  agentsList: AgentsListResult | null;
+  agentsError: string | null;
   sessionsLoading: boolean;
   sessionsResult: SessionsListResult | null;
   sessionsError: string | null;
@@ -139,6 +152,7 @@ export type AppViewState = {
   setTheme: (theme: ThemeMode, context?: ThemeTransitionContext) => void;
   applySettings: (next: UiSettings) => void;
   loadOverview: () => Promise<void>;
+  loadAssistantIdentity: () => Promise<void>;
   loadCron: () => Promise<void>;
   handleWhatsAppStart: (force: boolean) => Promise<void>;
   handleWhatsAppWait: () => Promise<void>;
@@ -152,6 +166,8 @@ export type AppViewState = {
   handleNostrProfileImport: () => Promise<void>;
   handleNostrProfileToggleAdvanced: () => void;
   handleExecApprovalDecision: (decision: "allow-once" | "allow-always" | "deny") => Promise<void>;
+  handleGatewayUrlConfirm: () => void;
+  handleGatewayUrlCancel: () => void;
   handleConfigLoad: () => Promise<void>;
   handleConfigSave: () => Promise<void>;
   handleConfigApply: () => Promise<void>;

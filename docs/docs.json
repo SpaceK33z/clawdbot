@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "Clawdbot",
+  "name": "OpenClaw",
   "theme": "mint",
   "logo": {
     "light": "/assets/pixel-lobster.svg",
@@ -13,11 +13,11 @@
   "topbarLinks": [
     {
       "name": "GitHub",
-      "url": "https://github.com/clawdbot/clawdbot"
+      "url": "https://github.com/openclaw/openclaw"
     },
     {
       "name": "Releases",
-      "url": "https://github.com/clawdbot/clawdbot/releases"
+      "url": "https://github.com/openclaw/openclaw/releases"
     }
   ],
   "redirects": [
@@ -70,6 +70,14 @@
       "destination": "/providers/minimax"
     },
     {
+      "source": "/xiaomi",
+      "destination": "/providers/xiaomi"
+    },
+    {
+      "source": "/xiaomi/",
+      "destination": "/providers/xiaomi"
+    },
+    {
       "source": "/openai",
       "destination": "/providers/openai"
     },
@@ -110,6 +118,22 @@
       "destination": "/providers/opencode"
     },
     {
+      "source": "/mattermost",
+      "destination": "/channels/mattermost"
+    },
+    {
+      "source": "/mattermost/",
+      "destination": "/channels/mattermost"
+    },
+    {
+      "source": "/line",
+      "destination": "/channels/line"
+    },
+    {
+      "source": "/line/",
+      "destination": "/channels/line"
+    },
+    {
       "source": "/glm",
       "destination": "/providers/glm"
     },
@@ -142,6 +166,14 @@
       "destination": "/channels/discord"
     },
     {
+      "source": "/providers/googlechat",
+      "destination": "/channels/googlechat"
+    },
+    {
+      "source": "/providers/googlechat/",
+      "destination": "/channels/googlechat"
+    },
+    {
       "source": "/providers/grammy",
       "destination": "/channels/grammy"
     },
@@ -166,12 +198,28 @@
       "destination": "/channels/location"
     },
     {
+      "source": "/providers/mattermost",
+      "destination": "/channels/mattermost"
+    },
+    {
+      "source": "/providers/mattermost/",
+      "destination": "/channels/mattermost"
+    },
+    {
       "source": "/providers/msteams",
       "destination": "/channels/msteams"
     },
     {
       "source": "/providers/msteams/",
       "destination": "/channels/msteams"
+    },
+    {
+      "source": "/providers/line",
+      "destination": "/channels/line"
+    },
+    {
+      "source": "/providers/line/",
+      "destination": "/channels/line"
     },
     {
       "source": "/providers/signal",
@@ -306,20 +354,32 @@
       "destination": "/automation/auth-monitoring"
     },
     {
-      "source": "/scripts",
-      "destination": "/scripts"
-    },
-    {
       "source": "/camera",
       "destination": "/nodes/camera"
     },
     {
       "source": "/clawd",
-      "destination": "/start/clawd"
+      "destination": "/start/openclaw"
+    },
+    {
+      "source": "/start/clawd",
+      "destination": "/start/openclaw"
+    },
+    {
+      "source": "/start/clawd/",
+      "destination": "/start/openclaw"
+    },
+    {
+      "source": "/clawhub",
+      "destination": "/tools/clawhub"
     },
     {
       "source": "/clawdhub",
-      "destination": "/tools/clawdhub"
+      "destination": "/tools/clawhub"
+    },
+    {
+      "source": "/tools/clawdhub",
+      "destination": "/tools/clawhub"
     },
     {
       "source": "/configuration",
@@ -332,6 +392,14 @@
     {
       "source": "/cron-jobs",
       "destination": "/automation/cron-jobs"
+    },
+    {
+      "source": "/cron-vs-heartbeat",
+      "destination": "/automation/cron-vs-heartbeat"
+    },
+    {
+      "source": "/cron-vs-heartbeat/",
+      "destination": "/automation/cron-vs-heartbeat"
     },
     {
       "source": "/dashboard",
@@ -363,7 +431,7 @@
     },
     {
       "source": "/faq",
-      "destination": "/start/faq"
+      "destination": "/help/faq"
     },
     {
       "source": "/gateway-lock",
@@ -424,10 +492,6 @@
     {
       "source": "/location-command",
       "destination": "/nodes/location-command"
-    },
-    {
-      "source": "/logging",
-      "destination": "/gateway/logging"
     },
     {
       "source": "/lore",
@@ -738,20 +802,12 @@
       "destination": "/start/wizard"
     },
     {
-      "source": "/install/node",
-      "destination": "/install#nodejs--npm-path-sanity"
-    },
-    {
-      "source": "/install/node/",
-      "destination": "/install#nodejs--npm-path-sanity"
-    },
-    {
       "source": "/start/faq",
-      "destination": "/help"
+      "destination": "/help/faq"
     },
     {
       "source": "/start/faq/",
-      "destination": "/help"
+      "destination": "/help/faq"
     },
     {
       "source": "/oauth",
@@ -760,6 +816,26 @@
     {
       "source": "/plugins",
       "destination": "/plugin"
+    },
+    {
+      "source": "/install/railway",
+      "destination": "/railway"
+    },
+    {
+      "source": "/install/railway/",
+      "destination": "/railway"
+    },
+    {
+      "source": "/install/northflank/",
+      "destination": "/northflank"
+    },
+    {
+      "source": "/gcp",
+      "destination": "/platforms/gcp"
+    },
+    {
+      "source": "/gcp/",
+      "destination": "/platforms/gcp"
     }
   ],
   "navigation": {
@@ -772,7 +848,7 @@
           "start/wizard",
           "start/setup",
           "start/pairing",
-          "start/clawd",
+          "start/openclaw",
           "start/showcase",
           "start/hubs",
           "start/onboarding",
@@ -798,6 +874,9 @@
           "install/ansible",
           "install/nix",
           "install/docker",
+          "railway",
+          "render",
+          "northflank",
           "install/bun"
         ]
       },
@@ -826,12 +905,12 @@
           "cli/memory",
           "cli/models",
           "cli/logs",
+          "cli/system",
           "cli/nodes",
           "cli/approvals",
           "cli/gateway",
           "cli/tui",
           "cli/voicecall",
-          "cli/wake",
           "cli/cron",
           "cli/dns",
           "cli/docs",
@@ -892,6 +971,7 @@
           "gateway/configuration-examples",
           "gateway/authentication",
           "gateway/openai-http-api",
+          "gateway/tools-invoke-http-api",
           "gateway/cli-backends",
           "gateway/local-models",
           "gateway/background-process",
@@ -900,6 +980,7 @@
           "gateway/doctor",
           "gateway/logging",
           "gateway/security",
+          "security/formal-verification",
           "gateway/sandbox-vs-tool-policy-vs-elevated",
           "gateway/sandboxing",
           "gateway/troubleshooting",
@@ -930,9 +1011,12 @@
           "channels/grammy",
           "channels/discord",
           "channels/slack",
+          "channels/googlechat",
+          "channels/mattermost",
           "channels/signal",
           "channels/imessage",
           "channels/msteams",
+          "channels/line",
           "channels/matrix",
           "channels/zalo",
           "channels/zalouser",
@@ -951,6 +1035,7 @@
           "bedrock",
           "providers/moonshot",
           "providers/minimax",
+          "providers/vercel-ai-gateway",
           "providers/openrouter",
           "providers/synthetic",
           "providers/opencode",
@@ -967,6 +1052,7 @@
           "automation/webhook",
           "automation/gmail-pubsub",
           "automation/cron-jobs",
+          "automation/cron-vs-heartbeat",
           "automation/poll"
         ]
       },
@@ -974,6 +1060,8 @@
         "group": "Tools & Skills",
         "pages": [
           "tools",
+          "tools/lobster",
+          "tools/llm-task",
           "plugin",
           "plugins/voice-call",
           "plugins/zalouser",
@@ -993,7 +1081,7 @@
           "tools/reactions",
           "tools/skills",
           "tools/skills-config",
-          "tools/clawdhub"
+          "tools/clawhub"
         ]
       },
       {
@@ -1013,11 +1101,14 @@
         "pages": [
           "platforms",
           "platforms/macos",
+          "platforms/macos-vm",
           "platforms/ios",
           "platforms/android",
           "platforms/windows",
           "platforms/linux",
+          "platforms/fly",
           "platforms/hetzner",
+          "platforms/gcp",
           "platforms/exe-dev"
         ]
       },

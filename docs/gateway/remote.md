@@ -8,7 +8,7 @@ read_when:
 This repo supports “remote over SSH” by keeping a single Gateway (the master) running on a dedicated host (desktop/server) and connecting clients to it.
 
 - For **operators (you / the macOS app)**: SSH tunneling is the universal fallback.
-- For **nodes (iOS/Android and future devices)**: prefer the Gateway **Bridge** when on the same LAN/tailnet (see [Discovery](/gateway/discovery)).
+- For **nodes (iOS/Android and future devices)**: connect to the Gateway **WebSocket** (LAN/tailnet or SSH tunnel as needed).
 
 ## The core idea
 
@@ -34,7 +34,7 @@ This is ideal when your laptop sleeps often but you want the agent always-on.
 
 The laptop does **not** run the agent. It connects remotely:
 
-- Use the macOS app’s **Remote over SSH** mode (Settings → General → “Clawdbot runs”).
+- Use the macOS app’s **Remote over SSH** mode (Settings → General → “OpenClaw runs”).
 - The app opens and manages the tunnel, so WebChat + health checks “just work.”
 
 Runbook: [macOS remote access](/platforms/mac/remote).
@@ -55,12 +55,12 @@ One gateway service owns state + channels. Nodes are peripherals.
 Flow example (Telegram → node):
 - Telegram message arrives at the **Gateway**.
 - Gateway runs the **agent** and decides whether to call a node tool.
-- Gateway calls the **node** over the Bridge (`node.*` RPC).
+- Gateway calls the **node** over the Gateway WebSocket (`node.*` RPC).
 - Node returns the result; Gateway replies back out to Telegram.
 
 Notes:
 - **Nodes do not run the gateway service.** Only one gateway should run per host unless you intentionally run isolated profiles (see [Multiple gateways](/gateway/multiple-gateways)).
-- macOS app “node mode” is just a node client over the Bridge.
+- macOS app “node mode” is just a node client over the Gateway WebSocket.
 
 ## SSH tunnel (CLI + tools)
 
@@ -71,10 +71,10 @@ ssh -N -L 18789:127.0.0.1:18789 user@host
 ```
 
 With the tunnel up:
-- `clawdbot health` and `clawdbot status --deep` now reach the remote gateway via `ws://127.0.0.1:18789`.
-- `clawdbot gateway {status,health,send,agent,call}` can also target the forwarded URL via `--url` when needed.
+- `openclaw health` and `openclaw status --deep` now reach the remote gateway via `ws://127.0.0.1:18789`.
+- `openclaw gateway {status,health,send,agent,call}` can also target the forwarded URL via `--url` when needed.
 
-Note: replace `18789` with your configured `gateway.port` (or `--port`/`CLAWDBOT_GATEWAY_PORT`).
+Note: replace `18789` with your configured `gateway.port` (or `--port`/`OPENCLAW_GATEWAY_PORT`).
 
 ## CLI remote defaults
 
@@ -117,6 +117,6 @@ Short version: **keep the Gateway loopback-only** unless you’re sure you need 
 - `gateway.remote.tlsFingerprint` pins the remote TLS cert when using `wss://`.
 - **Tailscale Serve** can authenticate via identity headers when `gateway.auth.allowTailscale: true`.
   Set it to `false` if you want tokens/passwords instead.
-- Treat `browser.controlUrl` like an admin API: tailnet-only + token auth.
+- Treat browser control like operator access: tailnet-only + deliberate node pairing.
 
 Deep dive: [Security](/gateway/security).

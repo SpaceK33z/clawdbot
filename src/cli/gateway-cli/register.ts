@@ -1,11 +1,14 @@
 import type { Command } from "commander";
 import { gatewayStatusCommand } from "../../commands/gateway-status.js";
 import { formatHealthChannelLines, type HealthSummary } from "../../commands/health.js";
+import { loadConfig } from "../../config/config.js";
 import { discoverGatewayBeacons } from "../../infra/bonjour-discovery.js";
-import { WIDE_AREA_DISCOVERY_DOMAIN } from "../../infra/widearea-dns.js";
+import type { CostUsageSummary } from "../../infra/session-cost-usage.js";
+import { resolveWideAreaDiscoveryDomain } from "../../infra/widearea-dns.js";
 import { defaultRuntime } from "../../runtime.js";
 import { formatDocsLink } from "../../terminal/links.js";
 import { colorize, isRich, theme } from "../../terminal/theme.js";
+import { formatTokenCount, formatUsd } from "../../utils/usage-format.js";
 import { withProgress } from "../progress.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import {
@@ -58,6 +61,41 @@ function runGatewayCommand(action: () => Promise<void>, label?: string) {
   });
 }
 
+function parseDaysOption(raw: unknown, fallback = 30): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.max(1, Math.floor(raw));
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return Math.max(1, Math.floor(parsed));
+  }
+  return fallback;
+}
+
+function renderCostUsageSummary(summary: CostUsageSummary, days: number, rich: boolean): string[] {
+  const totalCost = formatUsd(summary.totals.totalCost) ?? "$0.00";
+  const totalTokens = formatTokenCount(summary.totals.totalTokens) ?? "0";
+  const lines = [
+    colorize(rich, theme.heading, `Usage cost (${days} days)`),
+    `${colorize(rich, theme.muted, "Total:")} ${totalCost} · ${totalTokens} tokens`,
+  ];
+
+  if (summary.totals.missingCostEntries > 0) {
+    lines.push(
+      `${colorize(rich, theme.muted, "Missing entries:")} ${summary.totals.missingCostEntries}`,
+    );
+  }
+
+  const latest = summary.daily.at(-1);
+  if (latest) {
+    const latestCost = formatUsd(latest.totalCost) ?? "$0.00";
+    const latestTokens = formatTokenCount(latest.totalTokens) ?? "0";
+    lines.push(
+      `${colorize(rich, theme.muted, "Latest day:")} ${latest.date} · ${latestCost} · ${latestTokens} tokens`,
+    );
+  }
+
+  return lines;
+}
+
 export function registerGatewayCli(program: Command) {
   const gateway = addGatewayRunCommand(
     program
@@ -66,7 +104,7 @@ export function registerGatewayCli(program: Command) {
       .addHelpText(
         "after",
         () =>
-          `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/gateway", "docs.clawd.bot/cli/gateway")}\n`,
+          `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/gateway", "docs.openclaw.ai/cli/gateway")}\n`,
       ),
   );
 
@@ -162,6 +200,28 @@ export function registerGatewayCli(program: Command) {
 
   gatewayCallOpts(
     gateway
+      .command("usage-cost")
+      .description("Fetch usage cost summary from session logs")
+      .option("--days <days>", "Number of days to include", "30")
+      .action(async (opts) => {
+        await runGatewayCommand(async () => {
+          const days = parseDaysOption(opts.days);
+          const result = await callGatewayCli("usage.cost", opts, { days });
+          if (opts.json) {
+            defaultRuntime.log(JSON.stringify(result, null, 2));
+            return;
+          }
+          const rich = isRich();
+          const summary = result as CostUsageSummary;
+          for (const line of renderCostUsageSummary(summary, days, rich)) {
+            defaultRuntime.log(line);
+          }
+        }, "Gateway usage cost failed");
+      }),
+  );
+
+  gatewayCallOpts(
+    gateway
       .command("health")
       .description("Fetch Gateway health")
       .action(async (opts) => {
@@ -207,14 +267,17 @@ export function registerGatewayCli(program: Command) {
 
   gateway
     .command("discover")
-    .description(
-      `Discover gateways via Bonjour (multicast local. + unicast ${WIDE_AREA_DISCOVERY_DOMAIN})`,
-    )
+    .description("Discover gateways via Bonjour (local + wide-area if configured)")
     .option("--timeout <ms>", "Per-command timeout in ms", "2000")
     .option("--json", "Output JSON", false)
     .action(async (opts: GatewayDiscoverOpts) => {
       await runGatewayCommand(async () => {
+        const cfg = loadConfig();
+        const wideAreaDomain = resolveWideAreaDiscoveryDomain({
+          configDomain: cfg.discovery?.wideArea?.domain,
+        });
         const timeoutMs = parseDiscoverTimeoutMs(opts.timeout, 2000);
+        const domains = ["local.", ...(wideAreaDomain ? [wideAreaDomain] : [])];
         const beacons = await withProgress(
           {
             label: "Scanning for gateways…",
@@ -222,7 +285,7 @@ export function registerGatewayCli(program: Command) {
             enabled: opts.json !== true,
             delayMs: 0,
           },
-          async () => await discoverGatewayBeacons({ timeoutMs }),
+          async () => await discoverGatewayBeacons({ timeoutMs, wideAreaDomain }),
         );
 
         const deduped = dedupeBeacons(beacons).sort((a, b) =>
@@ -241,7 +304,7 @@ export function registerGatewayCli(program: Command) {
             JSON.stringify(
               {
                 timeoutMs,
-                domains: ["local.", WIDE_AREA_DISCOVERY_DOMAIN],
+                domains,
                 count: enriched.length,
                 beacons: enriched,
               },
@@ -258,7 +321,7 @@ export function registerGatewayCli(program: Command) {
           colorize(
             rich,
             theme.muted,
-            `Found ${deduped.length} gateway(s) · domains: local., ${WIDE_AREA_DISCOVERY_DOMAIN}`,
+            `Found ${deduped.length} gateway(s) · domains: ${domains.join(", ")}`,
           ),
         );
         if (deduped.length === 0) return;

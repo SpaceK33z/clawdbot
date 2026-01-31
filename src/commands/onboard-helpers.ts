@@ -6,11 +6,11 @@ import { inspect } from "node:util";
 import { cancel, isCancel } from "@clack/prompts";
 
 import { DEFAULT_AGENT_WORKSPACE_DIR, ensureAgentWorkspace } from "../agents/workspace.js";
-import type { ClawdbotConfig } from "../config/config.js";
-import { CONFIG_PATH_CLAWDBOT } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { CONFIG_PATH } from "../config/config.js";
 import { resolveSessionTranscriptsDirForAgent } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
-import { normalizeControlUiBasePath } from "../gateway/control-ui.js";
+import { normalizeControlUiBasePath } from "../gateway/control-ui-shared.js";
 import { isSafeExecutableValue } from "../infra/exec-safety.js";
 import { pickPrimaryTailnetIPv4 } from "../infra/tailnet.js";
 import { isWSL } from "../infra/wsl.js";
@@ -18,7 +18,13 @@ import { runCommandWithTimeout } from "../process/exec.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { stylePromptTitle } from "../terminal/prompt-style.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
-import { CONFIG_DIR, resolveUserPath, sleep } from "../utils.js";
+import {
+  CONFIG_DIR,
+  resolveUserPath,
+  shortenHomeInString,
+  shortenHomePath,
+  sleep,
+} from "../utils.js";
 import { VERSION } from "../version.js";
 import type { NodeManagerChoice, OnboardMode, ResetScope } from "./onboard-types.js";
 
@@ -30,24 +36,24 @@ export function guardCancel<T>(value: T | symbol, runtime: RuntimeEnv): T {
   return value as T;
 }
 
-export function summarizeExistingConfig(config: ClawdbotConfig): string {
+export function summarizeExistingConfig(config: OpenClawConfig): string {
   const rows: string[] = [];
   const defaults = config.agents?.defaults;
-  if (defaults?.workspace) rows.push(`workspace: ${defaults.workspace}`);
+  if (defaults?.workspace) rows.push(shortenHomeInString(`workspace: ${defaults.workspace}`));
   if (defaults?.model) {
     const model = typeof defaults.model === "string" ? defaults.model : defaults.model.primary;
-    if (model) rows.push(`model: ${model}`);
+    if (model) rows.push(shortenHomeInString(`model: ${model}`));
   }
-  if (config.gateway?.mode) rows.push(`gateway.mode: ${config.gateway.mode}`);
+  if (config.gateway?.mode) rows.push(shortenHomeInString(`gateway.mode: ${config.gateway.mode}`));
   if (typeof config.gateway?.port === "number") {
-    rows.push(`gateway.port: ${config.gateway.port}`);
+    rows.push(shortenHomeInString(`gateway.port: ${config.gateway.port}`));
   }
-  if (config.gateway?.bind) rows.push(`gateway.bind: ${config.gateway.bind}`);
+  if (config.gateway?.bind) rows.push(shortenHomeInString(`gateway.bind: ${config.gateway.bind}`));
   if (config.gateway?.remote?.url) {
-    rows.push(`gateway.remote.url: ${config.gateway.remote.url}`);
+    rows.push(shortenHomeInString(`gateway.remote.url: ${config.gateway.remote.url}`));
   }
   if (config.skills?.install?.nodeManager) {
-    rows.push(`skills.nodeManager: ${config.skills.install.nodeManager}`);
+    rows.push(shortenHomeInString(`skills.nodeManager: ${config.skills.install.nodeManager}`));
   }
   return rows.length ? rows.join("\n") : "No key settings detected.";
 }
@@ -56,22 +62,28 @@ export function randomToken(): string {
   return crypto.randomBytes(24).toString("hex");
 }
 
+export function normalizeGatewayTokenInput(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
 export function printWizardHeader(runtime: RuntimeEnv) {
   const header = [
-    "░████░█░░░░░█████░█░░░█░███░░████░░████░░▀█▀",
-    "█░░░░░█░░░░░█░░░█░█░█░█░█░░█░█░░░█░█░░░█░░█░",
-    "█░░░░░█░░░░░█████░█░█░█░█░░█░████░░█░░░█░░█░",
-    "█░░░░░█░░░░░█░░░█░█░█░█░█░░█░█░░█░░█░░░█░░█░",
-    "░████░█████░█░░░█░░█░█░░███░░████░░░███░░░█░",
-    "              🦞 FRESH DAILY 🦞",
+    "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
+    "██░▄▄▄░██░▄▄░██░▄▄▄██░▀██░██░▄▄▀██░████░▄▄▀██░███░██",
+    "██░███░██░▀▀░██░▄▄▄██░█░█░██░█████░████░▀▀░██░█░█░██",
+    "██░▀▀▀░██░█████░▀▀▀██░██▄░██░▀▀▄██░▀▀░█░██░██▄▀▄▀▄██",
+    "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+    "                  🦞 OPENCLAW 🦞                    ",
+    " ",
   ].join("\n");
   runtime.log(header);
 }
 
 export function applyWizardMetadata(
-  cfg: ClawdbotConfig,
+  cfg: OpenClawConfig,
   params: { command: string; mode: OnboardMode },
-): ClawdbotConfig {
+): OpenClawConfig {
   const commit = process.env.GIT_COMMIT?.trim() || process.env.GIT_SHA?.trim() || undefined;
   return {
     ...cfg,
@@ -171,8 +183,8 @@ export function formatControlUiSshHint(params: {
     localUrl,
     authedUrl,
     "Docs:",
-    "https://docs.clawd.bot/gateway/remote",
-    "https://docs.clawd.bot/web/control-ui",
+    "https://docs.openclaw.ai/gateway/remote",
+    "https://docs.openclaw.ai/web/control-ui",
   ]
     .filter(Boolean)
     .join("\n");
@@ -186,6 +198,7 @@ function resolveSshTargetHint(): string {
 }
 
 export async function openUrl(url: string): Promise<boolean> {
+  if (shouldSkipBrowserOpenInTests()) return false;
   const resolved = await resolveBrowserOpenCommand();
   if (!resolved.argv) return false;
   const quoteUrl = resolved.quoteUrl === true;
@@ -211,6 +224,20 @@ export async function openUrl(url: string): Promise<boolean> {
   }
 }
 
+export async function openUrlInBackground(url: string): Promise<boolean> {
+  if (shouldSkipBrowserOpenInTests()) return false;
+  if (process.platform !== "darwin") return false;
+  const resolved = await resolveBrowserOpenCommand();
+  if (!resolved.argv || resolved.command !== "open") return false;
+  const command = ["open", "-g", url];
+  try {
+    await runCommandWithTimeout(command, { timeoutMs: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureWorkspaceAndSessions(
   workspaceDir: string,
   runtime: RuntimeEnv,
@@ -220,10 +247,10 @@ export async function ensureWorkspaceAndSessions(
     dir: workspaceDir,
     ensureBootstrapFiles: !options?.skipBootstrap,
   });
-  runtime.log(`Workspace OK: ${ws.dir}`);
+  runtime.log(`Workspace OK: ${shortenHomePath(ws.dir)}`);
   const sessionsDir = resolveSessionTranscriptsDirForAgent(options?.agentId);
   await fs.mkdir(sessionsDir, { recursive: true });
-  runtime.log(`Sessions OK: ${sessionsDir}`);
+  runtime.log(`Sessions OK: ${shortenHomePath(sessionsDir)}`);
 }
 
 export function resolveNodeManagerOptions(): Array<{
@@ -246,14 +273,14 @@ export async function moveToTrash(pathname: string, runtime: RuntimeEnv): Promis
   }
   try {
     await runCommandWithTimeout(["trash", pathname], { timeoutMs: 5000 });
-    runtime.log(`Moved to Trash: ${pathname}`);
+    runtime.log(`Moved to Trash: ${shortenHomePath(pathname)}`);
   } catch {
-    runtime.log(`Failed to move to Trash (manual delete): ${pathname}`);
+    runtime.log(`Failed to move to Trash (manual delete): ${shortenHomePath(pathname)}`);
   }
 }
 
 export async function handleReset(scope: ResetScope, workspaceDir: string, runtime: RuntimeEnv) {
-  await moveToTrash(CONFIG_PATH_CLAWDBOT, runtime);
+  await moveToTrash(CONFIG_PATH, runtime);
   if (scope === "config") return;
   await moveToTrash(path.join(CONFIG_DIR, "credentials"), runtime);
   await moveToTrash(resolveSessionTranscriptsDirForAgent(), runtime);
@@ -287,6 +314,11 @@ export async function detectBinary(name: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function shouldSkipBrowserOpenInTests(): boolean {
+  if (process.env.VITEST) return true;
+  return process.env.NODE_ENV === "test";
 }
 
 export async function probeGatewayReachable(params: {

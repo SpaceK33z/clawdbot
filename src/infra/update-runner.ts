@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { type CommandOptions, runCommandWithTimeout } from "../process/exec.js";
@@ -63,7 +64,10 @@ type UpdateRunnerOptions = {
 
 const DEFAULT_TIMEOUT_MS = 20 * 60_000;
 const MAX_LOG_CHARS = 8000;
+const PREFLIGHT_MAX_COMMITS = 10;
 const START_DIRS = ["cwd", "argv1", "process"];
+const DEFAULT_PACKAGE_NAME = "openclaw";
+const CORE_PACKAGE_NAMES = new Set([DEFAULT_PACKAGE_NAME]);
 
 function normalizeDir(value?: string | null) {
   if (!value) return null;
@@ -103,6 +107,17 @@ async function readPackageVersion(root: string) {
     const raw = await fs.readFile(path.join(root, "package.json"), "utf-8");
     const parsed = JSON.parse(raw) as { version?: string };
     return typeof parsed?.version === "string" ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readPackageName(root: string) {
+  try {
+    const raw = await fs.readFile(path.join(root, "package.json"), "utf-8");
+    const parsed = JSON.parse(raw) as { name?: string };
+    const name = parsed?.name?.trim();
+    return name ? name : null;
   } catch {
     return null;
   }
@@ -181,7 +196,8 @@ async function findPackageRoot(candidates: string[]) {
       try {
         const raw = await fs.readFile(pkgPath, "utf-8");
         const parsed = JSON.parse(raw) as { name?: string };
-        if (parsed?.name === "clawdbot") return current;
+        const name = parsed?.name?.trim();
+        if (name && CORE_PACKAGE_NAMES.has(name)) return current;
       } catch {
         // ignore
       }
@@ -275,7 +291,11 @@ function managerInstallArgs(manager: "pnpm" | "bun" | "npm") {
 function normalizeTag(tag?: string) {
   const trimmed = tag?.trim();
   if (!trimmed) return "latest";
-  return trimmed.startsWith("clawdbot@") ? trimmed.slice("clawdbot@".length) : trimmed;
+  if (trimmed.startsWith("openclaw@")) return trimmed.slice("openclaw@".length);
+  if (trimmed.startsWith(`${DEFAULT_PACKAGE_NAME}@`)) {
+    return trimmed.slice(`${DEFAULT_PACKAGE_NAME}@`.length);
+  }
+  return trimmed;
 }
 
 export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<UpdateRunResult> {
@@ -327,7 +347,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
       status: "error",
       mode: "unknown",
       root: gitRoot,
-      reason: "not-clawdbot-root",
+      reason: "not-openclaw-root",
       steps: [],
       durationMs: Date.now() - startedAt,
     };
@@ -344,10 +364,14 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
     const channel: UpdateChannel = opts.channel ?? "dev";
     const branch = channel === "dev" ? await readBranchName(runCommand, gitRoot, timeoutMs) : null;
     const needsCheckoutMain = channel === "dev" && branch !== DEV_BRANCH;
-    gitTotalSteps = channel === "dev" ? (needsCheckoutMain ? 10 : 9) : 8;
+    gitTotalSteps = channel === "dev" ? (needsCheckoutMain ? 11 : 10) : 9;
 
     const statusCheck = await runStep(
-      step("clean check", ["git", "-C", gitRoot, "status", "--porcelain"], gitRoot),
+      step(
+        "clean check",
+        ["git", "-C", gitRoot, "status", "--porcelain", "--", ":!dist/control-ui/"],
+        gitRoot,
+      ),
     );
     steps.push(statusCheck);
     const hasUncommittedChanges =
@@ -420,8 +444,152 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
       );
       steps.push(fetchStep);
 
+      const upstreamShaStep = await runStep(
+        step(
+          "git rev-parse @{upstream}",
+          ["git", "-C", gitRoot, "rev-parse", "@{upstream}"],
+          gitRoot,
+        ),
+      );
+      steps.push(upstreamShaStep);
+      const upstreamSha = upstreamShaStep.stdoutTail?.trim();
+      if (!upstreamShaStep.stdoutTail || !upstreamSha) {
+        return {
+          status: "error",
+          mode: "git",
+          root: gitRoot,
+          reason: "no-upstream-sha",
+          before: { sha: beforeSha, version: beforeVersion },
+          steps,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
+      const revListStep = await runStep(
+        step(
+          "git rev-list",
+          ["git", "-C", gitRoot, "rev-list", `--max-count=${PREFLIGHT_MAX_COMMITS}`, upstreamSha],
+          gitRoot,
+        ),
+      );
+      steps.push(revListStep);
+      if (revListStep.exitCode !== 0) {
+        return {
+          status: "error",
+          mode: "git",
+          root: gitRoot,
+          reason: "preflight-revlist-failed",
+          before: { sha: beforeSha, version: beforeVersion },
+          steps,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
+      const candidates = (revListStep.stdoutTail ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (candidates.length === 0) {
+        return {
+          status: "error",
+          mode: "git",
+          root: gitRoot,
+          reason: "preflight-no-candidates",
+          before: { sha: beforeSha, version: beforeVersion },
+          steps,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
+      const manager = await detectPackageManager(gitRoot);
+      const preflightRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-update-preflight-"));
+      const worktreeDir = path.join(preflightRoot, "worktree");
+      const worktreeStep = await runStep(
+        step(
+          "preflight worktree",
+          ["git", "-C", gitRoot, "worktree", "add", "--detach", worktreeDir, upstreamSha],
+          gitRoot,
+        ),
+      );
+      steps.push(worktreeStep);
+      if (worktreeStep.exitCode !== 0) {
+        await fs.rm(preflightRoot, { recursive: true, force: true }).catch(() => {});
+        return {
+          status: "error",
+          mode: "git",
+          root: gitRoot,
+          reason: "preflight-worktree-failed",
+          before: { sha: beforeSha, version: beforeVersion },
+          steps,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
+      let selectedSha: string | null = null;
+      try {
+        for (const sha of candidates) {
+          const shortSha = sha.slice(0, 8);
+          const checkoutStep = await runStep(
+            step(
+              `preflight checkout (${shortSha})`,
+              ["git", "-C", worktreeDir, "checkout", "--detach", sha],
+              worktreeDir,
+            ),
+          );
+          steps.push(checkoutStep);
+          if (checkoutStep.exitCode !== 0) continue;
+
+          const depsStep = await runStep(
+            step(`preflight deps install (${shortSha})`, managerInstallArgs(manager), worktreeDir),
+          );
+          steps.push(depsStep);
+          if (depsStep.exitCode !== 0) continue;
+
+          const lintStep = await runStep(
+            step(`preflight lint (${shortSha})`, managerScriptArgs(manager, "lint"), worktreeDir),
+          );
+          steps.push(lintStep);
+          if (lintStep.exitCode !== 0) continue;
+
+          const buildStep = await runStep(
+            step(`preflight build (${shortSha})`, managerScriptArgs(manager, "build"), worktreeDir),
+          );
+          steps.push(buildStep);
+          if (buildStep.exitCode !== 0) continue;
+
+          selectedSha = sha;
+          break;
+        }
+      } finally {
+        const removeStep = await runStep(
+          step(
+            "preflight cleanup",
+            ["git", "-C", gitRoot, "worktree", "remove", "--force", worktreeDir],
+            gitRoot,
+          ),
+        );
+        steps.push(removeStep);
+        await runCommand(["git", "-C", gitRoot, "worktree", "prune"], {
+          cwd: gitRoot,
+          timeoutMs,
+        }).catch(() => null);
+        await fs.rm(preflightRoot, { recursive: true, force: true }).catch(() => {});
+      }
+
+      if (!selectedSha) {
+        return {
+          status: "error",
+          mode: "git",
+          root: gitRoot,
+          reason: "preflight-no-good-commit",
+          before: { sha: beforeSha, version: beforeVersion },
+          steps,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
       const rebaseStep = await runStep(
-        step("git rebase", ["git", "-C", gitRoot, "rebase", "@{upstream}"], gitRoot),
+        step("git rebase", ["git", "-C", gitRoot, "rebase", selectedSha], gitRoot),
       );
       steps.push(rebaseStep);
       if (rebaseStep.exitCode !== 0) {
@@ -508,12 +676,23 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
     );
     steps.push(uiBuildStep);
 
+    // Restore dist/control-ui/ to committed state to prevent dirty repo after update
+    // (ui:build regenerates assets with new hashes, which would block future updates)
+    const restoreUiStep = await runStep(
+      step(
+        "restore control-ui",
+        ["git", "-C", gitRoot, "checkout", "--", "dist/control-ui/"],
+        gitRoot,
+      ),
+    );
+    steps.push(restoreUiStep);
+
     const doctorStep = await runStep(
       step(
-        "clawdbot doctor",
-        managerScriptArgs(manager, "clawdbot", ["doctor", "--non-interactive"]),
+        "openclaw doctor",
+        managerScriptArgs(manager, "openclaw", ["doctor", "--non-interactive"]),
         gitRoot,
-        { CLAWDBOT_UPDATE_IN_PROGRESS: "1" },
+        { OPENCLAW_UPDATE_IN_PROGRESS: "1" },
       ),
     );
     steps.push(doctorStep);
@@ -553,7 +732,8 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
   const beforeVersion = await readPackageVersion(pkgRoot);
   const globalManager = await detectGlobalInstallManagerForRoot(runCommand, pkgRoot, timeoutMs);
   if (globalManager) {
-    const spec = `clawdbot@${normalizeTag(opts.tag)}`;
+    const packageName = (await readPackageName(pkgRoot)) ?? DEFAULT_PACKAGE_NAME;
+    const spec = `${packageName}@${normalizeTag(opts.tag)}`;
     const updateStep = await runStep({
       runCommand,
       name: "global update",

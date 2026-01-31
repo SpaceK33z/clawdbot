@@ -1,14 +1,15 @@
-import type { ChannelMessageActionName, ChannelPlugin, ClawdbotConfig } from "clawdbot/plugin-sdk";
+import type { ChannelMessageActionName, ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
 import {
   buildChannelConfigSchema,
   DEFAULT_ACCOUNT_ID,
   MSTeamsConfigSchema,
   PAIRING_APPROVED_MESSAGE,
-} from "clawdbot/plugin-sdk";
+} from "openclaw/plugin-sdk";
 
 import { msteamsOnboardingAdapter } from "./onboarding.js";
 import { msteamsOutbound } from "./outbound.js";
 import { probeMSTeams } from "./probe.js";
+import { resolveMSTeamsGroupToolPolicy } from "./policy.js";
 import {
   normalizeMSTeamsMessagingTarget,
   normalizeMSTeamsUserInput,
@@ -17,7 +18,7 @@ import {
   resolveMSTeamsChannelAllowlist,
   resolveMSTeamsUserAllowlist,
 } from "./resolve-allowlist.js";
-import { sendMessageMSTeams } from "./send.js";
+import { sendAdaptiveCardMSTeams, sendMessageMSTeams } from "./send.js";
 import { resolveMSTeamsCredentials } from "./token.js";
 import {
   listMSTeamsDirectoryGroupsLive,
@@ -64,6 +65,22 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
     threads: true,
     media: true,
   },
+  agentPrompt: {
+    messageToolHints: () => [
+      "- Adaptive Cards supported. Use `action=send` with `card={type,version,body}` to send rich cards.",
+      "- MSTeams targeting: omit `target` to reply to the current conversation (auto-inferred). Explicit targets: `user:ID` or `user:Display Name` (requires Graph API) for DMs, `conversation:19:...@thread.tacv2` for groups/channels. Prefer IDs over display names for speed.",
+    ],
+  },
+  threading: {
+    buildToolContext: ({ context, hasRepliedRef }) => ({
+      currentChannelId: context.To?.trim() || undefined,
+      currentThreadTs: context.ReplyToId,
+      hasRepliedRef,
+    }),
+  },
+  groups: {
+    resolveToolPolicy: resolveMSTeamsGroupToolPolicy,
+  },
   reload: { configPrefixes: ["channels.msteams"] },
   configSchema: buildChannelConfigSchema(MSTeamsConfigSchema),
   config: {
@@ -85,7 +102,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
       },
     }),
     deleteAccount: ({ cfg }) => {
-      const next = { ...cfg } as ClawdbotConfig;
+      const next = { ...cfg } as OpenClawConfig;
       const nextChannels = { ...cfg.channels };
       delete nextChannels.msteams;
       if (Object.keys(nextChannels).length > 0) {
@@ -137,7 +154,12 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
       looksLikeId: (raw) => {
         const trimmed = raw.trim();
         if (!trimmed) return false;
-        if (/^(conversation:|user:)/i.test(trimmed)) return true;
+        if (/^conversation:/i.test(trimmed)) return true;
+        if (/^user:/i.test(trimmed)) {
+          // Only treat as ID if the value after user: looks like a UUID
+          const id = trimmed.slice("user:".length).trim();
+          return /^[0-9a-fA-F-]{16,}$/.test(id);
+        }
         return trimmed.includes("@thread");
       },
       hint: "<conversationId|user:ID|conversation:ID>",
@@ -319,6 +341,50 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
         Boolean(resolveMSTeamsCredentials(cfg.channels?.msteams));
       if (!enabled) return [];
       return ["poll"] satisfies ChannelMessageActionName[];
+    },
+    supportsCards: ({ cfg }) => {
+      return (
+        cfg.channels?.msteams?.enabled !== false &&
+        Boolean(resolveMSTeamsCredentials(cfg.channels?.msteams))
+      );
+    },
+    handleAction: async (ctx) => {
+      // Handle send action with card parameter
+      if (ctx.action === "send" && ctx.params.card) {
+        const card = ctx.params.card as Record<string, unknown>;
+        const to =
+          typeof ctx.params.to === "string"
+            ? ctx.params.to.trim()
+            : typeof ctx.params.target === "string"
+              ? ctx.params.target.trim()
+              : "";
+        if (!to) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "Card send requires a target (to)." }],
+          };
+        }
+        const result = await sendAdaptiveCardMSTeams({
+          cfg: ctx.cfg,
+          to,
+          card,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                ok: true,
+                channel: "msteams",
+                messageId: result.messageId,
+                conversationId: result.conversationId,
+              }),
+            },
+          ],
+        };
+      }
+      // Return null to fall through to default handler
+      return null as never;
     },
   },
   outbound: msteamsOutbound,

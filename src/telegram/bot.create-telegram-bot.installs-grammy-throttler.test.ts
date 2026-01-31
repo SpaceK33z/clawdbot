@@ -1,8 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetInboundDedupe } from "../auto-reply/reply/inbound-dedupe.js";
-import { createTelegramBot, getTelegramSequentialKey } from "./bot.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { escapeRegExp, formatEnvelopeTimestamp } from "../../test/helpers/envelope-timestamp.js";
 import { resolveTelegramFetch } from "./fetch.js";
 
+let createTelegramBot: typeof import("./bot.js").createTelegramBot;
+let getTelegramSequentialKey: typeof import("./bot.js").getTelegramSequentialKey;
+let resetInboundDedupe: typeof import("../auto-reply/reply/inbound-dedupe.js").resetInboundDedupe;
+
+const { sessionStorePath } = vi.hoisted(() => ({
+  sessionStorePath: `/tmp/openclaw-telegram-throttler-${Math.random().toString(16).slice(2)}.json`,
+}));
 const { loadWebMedia } = vi.hoisted(() => ({
   loadWebMedia: vi.fn(),
 }));
@@ -19,6 +25,14 @@ vi.mock("../config/config.js", async (importOriginal) => {
   return {
     ...actual,
     loadConfig,
+  };
+});
+
+vi.mock("../config/sessions.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config/sessions.js")>();
+  return {
+    ...actual,
+    resolveStorePath: vi.fn((storePath) => storePath ?? sessionStorePath),
   };
 });
 
@@ -76,6 +90,7 @@ vi.mock("grammy", () => ({
     on = onSpy;
     stop = stopSpy;
     command = commandSpy;
+    catch = vi.fn();
     constructor(
       public token: string,
       public options?: {
@@ -113,7 +128,7 @@ vi.mock("../auto-reply/reply.js", () => {
   return { getReplyFromConfig: replySpy, __replySpy: replySpy };
 });
 
-const replyModule = await import("../auto-reply/reply.js");
+let replyModule: typeof import("../auto-reply/reply.js");
 
 const getOnHandler = (event: string) => {
   const handler = onSpy.mock.calls.find((call) => call[0] === event)?.[1];
@@ -121,10 +136,22 @@ const getOnHandler = (event: string) => {
   return handler as (ctx: Record<string, unknown>) => Promise<void>;
 };
 
+const ORIGINAL_TZ = process.env.TZ;
+
 describe("createTelegramBot", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ resetInboundDedupe } = await import("../auto-reply/reply/inbound-dedupe.js"));
+    ({ createTelegramBot, getTelegramSequentialKey } = await import("./bot.js"));
+    replyModule = await import("../auto-reply/reply.js");
+    process.env.TZ = "UTC";
     resetInboundDedupe();
     loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          envelopeTimezone: "utc",
+        },
+      },
       channels: {
         telegram: { dmPolicy: "open", allowFrom: ["*"] },
       },
@@ -140,6 +167,9 @@ describe("createTelegramBot", () => {
     botCtorSpy.mockReset();
     sequentializeKey = undefined;
   });
+  afterEach(() => {
+    process.env.TZ = ORIGINAL_TZ;
+  });
 
   // groupPolicy tests
 
@@ -148,13 +178,11 @@ describe("createTelegramBot", () => {
     expect(throttlerSpy).toHaveBeenCalledTimes(1);
     expect(useSpy).toHaveBeenCalledWith("throttler");
   });
-  it("forces native fetch only under Bun", () => {
+  it("uses wrapped fetch when global fetch is available", () => {
     const originalFetch = globalThis.fetch;
-    const originalBun = (globalThis as { Bun?: unknown }).Bun;
     const fetchSpy = vi.fn() as unknown as typeof fetch;
     globalThis.fetch = fetchSpy;
     try {
-      (globalThis as { Bun?: unknown }).Bun = {};
       createTelegramBot({ token: "tok" });
       const fetchImpl = resolveTelegramFetch();
       expect(fetchImpl).toBeTypeOf("function");
@@ -165,33 +193,6 @@ describe("createTelegramBot", () => {
       expect(clientFetch).not.toBe(fetchSpy);
     } finally {
       globalThis.fetch = originalFetch;
-      if (originalBun === undefined) {
-        delete (globalThis as { Bun?: unknown }).Bun;
-      } else {
-        (globalThis as { Bun?: unknown }).Bun = originalBun;
-      }
-    }
-  });
-  it("does not force native fetch on Node", () => {
-    const originalFetch = globalThis.fetch;
-    const originalBun = (globalThis as { Bun?: unknown }).Bun;
-    const fetchSpy = vi.fn() as unknown as typeof fetch;
-    globalThis.fetch = fetchSpy;
-    try {
-      if (originalBun !== undefined) {
-        delete (globalThis as { Bun?: unknown }).Bun;
-      }
-      createTelegramBot({ token: "tok" });
-      const fetchImpl = resolveTelegramFetch();
-      expect(fetchImpl).toBeUndefined();
-      expect(botCtorSpy).toHaveBeenCalledWith("tok", undefined);
-    } finally {
-      globalThis.fetch = originalFetch;
-      if (originalBun === undefined) {
-        delete (globalThis as { Bun?: unknown }).Bun;
-      } else {
-        (globalThis as { Bun?: unknown }).Bun = originalBun;
-      }
     }
   });
   it("passes timeoutSeconds even without a custom fetch", () => {
@@ -237,12 +238,17 @@ describe("createTelegramBot", () => {
     expect(getTelegramSequentialKey({ message: { chat: { id: 123 } } })).toBe("telegram:123");
     expect(
       getTelegramSequentialKey({
-        message: { chat: { id: 123 }, message_thread_id: 9 },
+        message: { chat: { id: 123, type: "private" }, message_thread_id: 9 },
       }),
     ).toBe("telegram:123:topic:9");
     expect(
       getTelegramSequentialKey({
-        message: { chat: { id: 123, is_forum: true } },
+        message: { chat: { id: 123, type: "supergroup" }, message_thread_id: 9 },
+      }),
+    ).toBe("telegram:123");
+    expect(
+      getTelegramSequentialKey({
+        message: { chat: { id: 123, type: "supergroup", is_forum: true } },
       }),
     ).toBe("telegram:123:topic:1");
     expect(
@@ -288,7 +294,7 @@ describe("createTelegramBot", () => {
           message_id: 10,
         },
       },
-      me: { username: "clawdbot_bot" },
+      me: { username: "openclaw_bot" },
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 
@@ -322,14 +328,18 @@ describe("createTelegramBot", () => {
       };
       await handler({
         message,
-        me: { username: "clawdbot_bot" },
+        me: { username: "openclaw_bot" },
         getFile: async () => ({ download: async () => new Uint8Array() }),
       });
 
       expect(replySpy).toHaveBeenCalledTimes(1);
       const payload = replySpy.mock.calls[0][0];
+      const expectedTimestamp = formatEnvelopeTimestamp(new Date("2025-01-09T00:00:00Z"));
+      const timestampPattern = escapeRegExp(expectedTimestamp);
       expect(payload.Body).toMatch(
-        /^\[Telegram Ada Lovelace \(@ada_bot\) id:1234 (\+\d+[smhd] )?2025-01-09T00:00Z\]/,
+        new RegExp(
+          `^\\[Telegram Ada Lovelace \\(@ada_bot\\) id:1234 (\\+\\d+[smhd] )?${timestampPattern}\\]`,
+        ),
       );
       expect(payload.Body).toContain("hello world");
     } finally {
@@ -361,7 +371,7 @@ describe("createTelegramBot", () => {
         date: 1736380800,
         from: { id: 999, username: "random" },
       },
-      me: { username: "clawdbot_bot" },
+      me: { username: "openclaw_bot" },
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 
@@ -398,12 +408,12 @@ describe("createTelegramBot", () => {
 
     await handler({
       message,
-      me: { username: "clawdbot_bot" },
+      me: { username: "openclaw_bot" },
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
     await handler({
       message: { ...message, text: "hello again" },
-      me: { username: "clawdbot_bot" },
+      me: { username: "openclaw_bot" },
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 
@@ -418,7 +428,7 @@ describe("createTelegramBot", () => {
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
     await handler({
       message: { chat: { id: 42, type: "private" }, text: "hi" },
-      me: { username: "clawdbot_bot" },
+      me: { username: "openclaw_bot" },
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { ClawdbotConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { MsgContext } from "../auto-reply/templating.js";
 import {
   buildProviderRegistry,
@@ -15,7 +15,9 @@ import {
 
 describe("runCapability auto audio entries", () => {
   it("uses provider keys to auto-enable audio transcription", async () => {
-    const tmpPath = path.join(os.tmpdir(), `clawdbot-auto-audio-${Date.now()}.wav`);
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/usr/bin:/bin";
+    const tmpPath = path.join(os.tmpdir(), `openclaw-auto-audio-${Date.now()}.wav`);
     await fs.writeFile(tmpPath, Buffer.from("RIFF"));
     const ctx: MsgContext = { MediaPath: tmpPath, MediaType: "audio/wav" };
     const media = normalizeMediaAttachments(ctx);
@@ -42,7 +44,7 @@ describe("runCapability auto audio entries", () => {
           },
         },
       },
-    } as unknown as ClawdbotConfig;
+    } as unknown as OpenClawConfig;
 
     try {
       const result = await runCapability({
@@ -54,16 +56,19 @@ describe("runCapability auto audio entries", () => {
         providerRegistry,
       });
       expect(result.outputs[0]?.text).toBe("ok");
-      expect(seenModel).toBe("whisper-1");
+      expect(seenModel).toBe("gpt-4o-mini-transcribe");
       expect(result.decision.outcome).toBe("success");
     } finally {
+      process.env.PATH = originalPath;
       await cache.cleanup();
       await fs.unlink(tmpPath).catch(() => {});
     }
   });
 
   it("skips auto audio when disabled", async () => {
-    const tmpPath = path.join(os.tmpdir(), `clawdbot-auto-audio-${Date.now()}.wav`);
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/usr/bin:/bin";
+    const tmpPath = path.join(os.tmpdir(), `openclaw-auto-audio-${Date.now()}.wav`);
     await fs.writeFile(tmpPath, Buffer.from("RIFF"));
     const ctx: MsgContext = { MediaPath: tmpPath, MediaType: "audio/wav" };
     const media = normalizeMediaAttachments(ctx);
@@ -93,7 +98,7 @@ describe("runCapability auto audio entries", () => {
           },
         },
       },
-    } as unknown as ClawdbotConfig;
+    } as unknown as OpenClawConfig;
 
     try {
       const result = await runCapability({
@@ -107,6 +112,7 @@ describe("runCapability auto audio entries", () => {
       expect(result.outputs).toHaveLength(0);
       expect(result.decision.outcome).toBe("disabled");
     } finally {
+      process.env.PATH = originalPath;
       await cache.cleanup();
       await fs.unlink(tmpPath).catch(() => {});
     }

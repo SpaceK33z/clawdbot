@@ -8,7 +8,7 @@ import { isWebchatClient } from "../../utils/message-channel.js";
 
 import type { ResolvedGatewayAuth } from "../auth.js";
 import { isLoopbackAddress } from "../net.js";
-import { HANDSHAKE_TIMEOUT_MS } from "../server-constants.js";
+import { getHandshakeTimeoutMs } from "../server-constants.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../server-methods/types.js";
 import { formatError } from "../server-utils.js";
 import { logWs } from "../ws-log.js";
@@ -73,6 +73,7 @@ export function attachGatewayWsConnectionHandler(params: {
     const requestOrigin = headerValue(upgradeReq.headers.origin);
     const requestUserAgent = headerValue(upgradeReq.headers["user-agent"]);
     const forwardedFor = headerValue(upgradeReq.headers["x-forwarded-for"]);
+    const realIp = headerValue(upgradeReq.headers["x-real-ip"]);
 
     const canvasHostPortForWs = canvasHostServerPort ?? (canvasHostEnabled ? port : undefined);
     const canvasHostOverride =
@@ -210,6 +211,7 @@ export function attachGatewayWsConnectionHandler(params: {
       close();
     });
 
+    const handshakeTimeoutMs = getHandshakeTimeoutMs();
     const handshakeTimer = setTimeout(() => {
       if (!client) {
         handshakeState = "failed";
@@ -219,7 +221,7 @@ export function attachGatewayWsConnectionHandler(params: {
         logWsControl.warn(`handshake timeout conn=${connId} remote=${remoteAddr ?? "?"}`);
         close();
       }
-    }, HANDSHAKE_TIMEOUT_MS);
+    }, handshakeTimeoutMs);
 
     attachGatewayWsMessageHandler({
       socket,
@@ -227,6 +229,7 @@ export function attachGatewayWsConnectionHandler(params: {
       connId,
       remoteAddr,
       forwardedFor,
+      realIp,
       requestHost,
       requestOrigin,
       requestUserAgent,

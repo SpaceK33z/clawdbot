@@ -2,18 +2,15 @@ import { Type } from "@sinclair/typebox";
 import {
   listChannelMessageActions,
   supportsChannelMessageButtons,
+  supportsChannelMessageCards,
 } from "../../channels/plugins/message-actions.js";
 import {
   CHANNEL_MESSAGE_ACTION_NAMES,
   type ChannelMessageActionName,
 } from "../../channels/plugins/types.js";
 import { BLUEBUBBLES_GROUP_ACTIONS } from "../../channels/plugins/bluebubbles-actions.js";
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
-import {
-  appendAssistantMessageToSessionTranscript,
-  resolveMirroredTranscriptText,
-} from "../../config/sessions.js";
 import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "../../gateway/protocol/client-info.js";
 import { normalizeTargetForProvider } from "../../infra/outbound/target-normalization.js";
 import { getToolResult, runMessageAction } from "../../infra/outbound/message-action-runner.js";
@@ -36,7 +33,7 @@ function buildRoutingSchema() {
   };
 }
 
-function buildSendSchema(options: { includeButtons: boolean }) {
+function buildSendSchema(options: { includeButtons: boolean; includeCards: boolean }) {
   const props: Record<string, unknown> = {
     message: Type.Optional(Type.String()),
     effectId: Type.Optional(
@@ -62,6 +59,10 @@ function buildSendSchema(options: { includeButtons: boolean }) {
     replyTo: Type.Optional(Type.String()),
     threadId: Type.Optional(Type.String()),
     asVoice: Type.Optional(Type.Boolean()),
+    silent: Type.Optional(Type.Boolean()),
+    quoteText: Type.Optional(
+      Type.String({ description: "Quote text for Telegram reply_parameters" }),
+    ),
     bestEffort: Type.Optional(Type.Boolean()),
     gifPlayback: Type.Optional(Type.Boolean()),
     buttons: Type.Optional(
@@ -77,8 +78,18 @@ function buildSendSchema(options: { includeButtons: boolean }) {
         },
       ),
     ),
+    card: Type.Optional(
+      Type.Object(
+        {},
+        {
+          additionalProperties: true,
+          description: "Adaptive Card JSON object (when supported by the channel)",
+        },
+      ),
+    ),
   };
   if (!options.includeButtons) delete props.buttons;
+  if (!options.includeCards) delete props.card;
   return props;
 }
 
@@ -87,6 +98,9 @@ function buildReactionSchema() {
     messageId: Type.Optional(Type.String()),
     emoji: Type.Optional(Type.String()),
     remove: Type.Optional(Type.Boolean()),
+    targetAuthor: Type.Optional(Type.String()),
+    targetAuthorUuid: Type.Optional(Type.String()),
+    groupId: Type.Optional(Type.String()),
   };
 }
 
@@ -192,7 +206,7 @@ function buildChannelManagementSchema() {
   };
 }
 
-function buildMessageToolSchemaProps(options: { includeButtons: boolean }) {
+function buildMessageToolSchemaProps(options: { includeButtons: boolean; includeCards: boolean }) {
   return {
     ...buildRoutingSchema(),
     ...buildSendSchema(options),
@@ -211,7 +225,7 @@ function buildMessageToolSchemaProps(options: { includeButtons: boolean }) {
 
 function buildMessageToolSchemaFromActions(
   actions: readonly string[],
-  options: { includeButtons: boolean },
+  options: { includeButtons: boolean; includeCards: boolean },
 ) {
   const props = buildMessageToolSchemaProps(options);
   return Type.Object({
@@ -222,12 +236,13 @@ function buildMessageToolSchemaFromActions(
 
 const MessageToolSchema = buildMessageToolSchemaFromActions(AllMessageActions, {
   includeButtons: true,
+  includeCards: true,
 });
 
 type MessageToolOptions = {
   agentAccountId?: string;
   agentSessionKey?: string;
-  config?: ClawdbotConfig;
+  config?: OpenClawConfig;
   currentChannelId?: string;
   currentChannelProvider?: string;
   currentThreadTs?: string;
@@ -235,11 +250,13 @@ type MessageToolOptions = {
   hasRepliedRef?: { value: boolean };
 };
 
-function buildMessageToolSchema(cfg: ClawdbotConfig) {
+function buildMessageToolSchema(cfg: OpenClawConfig) {
   const actions = listChannelMessageActions(cfg);
   const includeButtons = supportsChannelMessageButtons(cfg);
+  const includeCards = supportsChannelMessageCards(cfg);
   return buildMessageToolSchemaFromActions(actions.length > 0 ? actions : ["send"], {
     includeButtons,
+    includeCards,
   });
 }
 
@@ -271,7 +288,7 @@ function filterActionsForContext(params: {
 }
 
 function buildMessageToolDescription(options?: {
-  config?: ClawdbotConfig;
+  config?: OpenClawConfig;
   currentChannel?: string;
   currentChannelId?: string;
 }): string {
@@ -320,13 +337,23 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
     name: "message",
     description,
     parameters: schema,
-    execute: async (_toolCallId, args) => {
+    execute: async (_toolCallId, args, signal) => {
+      // Check if already aborted before doing any work
+      if (signal?.aborted) {
+        const err = new Error("Message send aborted");
+        err.name = "AbortError";
+        throw err;
+      }
       const params = args as Record<string, unknown>;
       const cfg = options?.config ?? loadConfig();
       const action = readStringParam(params, "action", {
         required: true,
       }) as ChannelMessageActionName;
+
       const accountId = readStringParam(params, "accountId") ?? agentAccountId;
+      if (accountId) {
+        params.accountId = accountId;
+      }
 
       const gateway = {
         url: readStringParam(params, "gatewayUrl", { trim: false }),
@@ -349,6 +376,9 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
               currentThreadTs: options?.currentThreadTs,
               replyToMode: options?.replyToMode,
               hasRepliedRef: options?.hasRepliedRef,
+              // Direct tool invocations should not add cross-context decoration.
+              // The agent is composing a message, not forwarding from another chat.
+              skipCrossContextDecoration: true,
             }
           : undefined;
 
@@ -359,35 +389,11 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         defaultAccountId: accountId ?? undefined,
         gateway,
         toolContext,
-        sessionKey: options?.agentSessionKey,
         agentId: options?.agentSessionKey
           ? resolveSessionAgentId({ sessionKey: options.agentSessionKey, config: cfg })
           : undefined,
+        abortSignal: signal,
       });
-
-      if (
-        action === "send" &&
-        options?.agentSessionKey &&
-        !result.dryRun &&
-        result.handledBy === "plugin"
-      ) {
-        const mediaUrl = typeof params.media === "string" ? params.media : undefined;
-        const mirrorText = resolveMirroredTranscriptText({
-          text: typeof params.message === "string" ? params.message : undefined,
-          mediaUrls: mediaUrl ? [mediaUrl] : undefined,
-        });
-        if (mirrorText) {
-          const agentId = resolveSessionAgentId({
-            sessionKey: options.agentSessionKey,
-            config: cfg,
-          });
-          await appendAssistantMessageToSessionTranscript({
-            agentId,
-            sessionKey: options.agentSessionKey,
-            text: mirrorText,
-          });
-        }
-      }
 
       const toolResult = getToolResult(result);
       if (toolResult) return toolResult;

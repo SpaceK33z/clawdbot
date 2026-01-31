@@ -8,9 +8,9 @@ read_when:
 > "Abandon all hope, ye who enter here."
 
 
-Updated: 2026-01-16
+Updated: 2026-01-21
 
-Status: text + DM attachments are supported; channel/group attachments require Microsoft Graph permissions. Polls are sent via Adaptive Cards.
+Status: text + DM attachments are supported; channel/group file sending requires `sharePointSiteId` + Graph permissions (see [Sending files in group chats](#sending-files-in-group-chats)). Polls are sent via Adaptive Cards.
 
 ## Plugin required
 Microsoft Teams ships as a plugin and is not bundled with the core install.
@@ -21,23 +21,23 @@ Explainable: keeps core installs lighter and lets MS Teams dependencies update i
 
 Install via CLI (npm registry):
 ```bash
-clawdbot plugins install @clawdbot/msteams
+openclaw plugins install @openclaw/msteams
 ```
 
 Local checkout (when running from a git repo):
 ```bash
-clawdbot plugins install ./extensions/msteams
+openclaw plugins install ./extensions/msteams
 ```
 
 If you choose Teams during configure/onboarding and a git checkout is detected,
-Clawdbot will offer the local install path automatically.
+OpenClaw will offer the local install path automatically.
 
 Details: [Plugins](/plugin)
 
 ## Quick setup (beginner)
 1) Install the Microsoft Teams plugin.
 2) Create an **Azure Bot** (App ID + client secret + tenant ID).
-3) Configure Clawdbot with those credentials.
+3) Configure OpenClaw with those credentials.
 4) Expose `/api/messages` (port 3978 by default) via a public URL or tunnel.
 5) Install the Teams app package and start the gateway.
 
@@ -58,7 +58,7 @@ Minimal config:
 Note: group chats are blocked by default (`channels.msteams.groupPolicy: "allowlist"`). To allow group replies, set `channels.msteams.groupAllowFrom` (or use `groupPolicy: "open"` to allow any member, mention-gated).
 
 ## Goals
-- Talk to Clawdbot via Teams DMs, group chats, or channels.
+- Talk to OpenClaw via Teams DMs, group chats, or channels.
 - Keep routing deterministic: replies always go back to the channel they arrived on.
 - Default to safe channel behavior (mentions required unless configured otherwise).
 
@@ -101,7 +101,7 @@ Example:
 - Keys can be team IDs or names; channel keys can be conversation IDs or names.
 - When `groupPolicy="allowlist"` and a teams allowlist is present, only listed teams/channels are accepted (mention‑gated).
 - The configure wizard accepts `Team/Channel` entries and stores them for you.
-- On startup, Clawdbot resolves team/channel and user allowlist names to IDs (when Graph permissions allow)
+- On startup, OpenClaw resolves team/channel and user allowlist names to IDs (when Graph permissions allow)
   and logs the mapping; unresolved entries are kept as typed.
 
 Example:
@@ -127,12 +127,12 @@ Example:
 2. Create an **Azure Bot** (App ID + secret + tenant ID).
 3. Build a **Teams app package** that references the bot and includes the RSC permissions below.
 4. Upload/install the Teams app into a team (or personal scope for DMs).
-5. Configure `msteams` in `~/.clawdbot/clawdbot.json` (or env vars) and start the gateway.
+5. Configure `msteams` in `~/.openclaw/openclaw.json` (or env vars) and start the gateway.
 6. The gateway listens for Bot Framework webhook traffic on `/api/messages` by default.
 
 ## Azure Bot Setup (Prerequisites)
 
-Before configuring Clawdbot, you need to create an Azure Bot resource.
+Before configuring OpenClaw, you need to create an Azure Bot resource.
 
 ### Step 1: Create Azure Bot
 
@@ -141,7 +141,7 @@ Before configuring Clawdbot, you need to create an Azure Bot resource.
 
    | Field | Value |
    |-------|-------|
-   | **Bot handle** | Your bot name, e.g., `clawdbot-msteams` (must be unique) |
+   | **Bot handle** | Your bot name, e.g., `openclaw-msteams` (must be unique) |
    | **Subscription** | Select your Azure subscription |
    | **Resource group** | Create new or use existing |
    | **Pricing tier** | **Free** for dev/testing |
@@ -218,8 +218,8 @@ This is often easier than hand-editing JSON manifests.
 
 ## Setup (minimal text-only)
 1. **Install the Microsoft Teams plugin**
-   - From npm: `clawdbot plugins install @clawdbot/msteams`
-   - From a local checkout: `clawdbot plugins install ./extensions/msteams`
+   - From npm: `openclaw plugins install @openclaw/msteams`
+   - From a local checkout: `openclaw plugins install ./extensions/msteams`
 
 2. **Bot registration**
    - Create an Azure Bot (see above) and note:
@@ -235,7 +235,7 @@ This is often easier than hand-editing JSON manifests.
    - Create icons: `outline.png` (32x32) and `color.png` (192x192).
    - Zip all three files together: `manifest.json`, `outline.png`, `color.png`.
 
-4. **Configure Clawdbot**
+4. **Configure OpenClaw**
    ```json
    {
      "msteams": {
@@ -289,14 +289,14 @@ Minimal, valid example with the required fields. Replace IDs and URLs.
   "manifestVersion": "1.23",
   "version": "1.0.0",
   "id": "00000000-0000-0000-0000-000000000000",
-  "name": { "short": "Clawdbot" },
+  "name": { "short": "OpenClaw" },
   "developer": {
     "name": "Your Org",
     "websiteUrl": "https://example.com",
     "privacyUrl": "https://example.com/privacy",
     "termsOfUseUrl": "https://example.com/terms"
   },
-  "description": { "short": "Clawdbot in Teams", "full": "Clawdbot in Teams" },
+  "description": { "short": "OpenClaw in Teams", "full": "OpenClaw in Teams" },
   "icons": { "outline": "outline.png", "color": "color.png" },
   "accentColor": "#5B6DEF",
   "bots": [
@@ -397,13 +397,13 @@ Teams delivers messages via HTTP webhook. If processing takes too long (e.g., sl
 - Teams retrying the message (causing duplicates)
 - Dropped replies
 
-Clawdbot handles this by returning quickly and sending replies proactively, but very slow responses may still cause issues.
+OpenClaw handles this by returning quickly and sending replies proactively, but very slow responses may still cause issues.
 
 ### Formatting
 Teams markdown is more limited than Slack or Discord:
 - Basic formatting works: **bold**, *italic*, `code`, links
 - Complex markdown (tables, nested lists) may not render correctly
-- Adaptive Cards are used for polls; other card types are not yet supported
+- Adaptive Cards are supported for polls and arbitrary card sends (see below)
 
 ## Configuration
 Key settings (see `/gateway/configuration` for shared channel patterns):
@@ -415,13 +415,19 @@ Key settings (see `/gateway/configuration` for shared channel patterns):
 - `channels.msteams.dmPolicy`: `pairing | allowlist | open | disabled` (default: pairing)
 - `channels.msteams.allowFrom`: allowlist for DMs (AAD object IDs, UPNs, or display names). The wizard resolves names to IDs during setup when Graph access is available.
 - `channels.msteams.textChunkLimit`: outbound text chunk size.
+- `channels.msteams.chunkMode`: `length` (default) or `newline` to split on blank lines (paragraph boundaries) before length chunking.
 - `channels.msteams.mediaAllowHosts`: allowlist for inbound attachment hosts (defaults to Microsoft/Teams domains).
 - `channels.msteams.requireMention`: require @mention in channels/groups (default true).
 - `channels.msteams.replyStyle`: `thread | top-level` (see [Reply Style](#reply-style-threads-vs-posts)).
 - `channels.msteams.teams.<teamId>.replyStyle`: per-team override.
 - `channels.msteams.teams.<teamId>.requireMention`: per-team override.
+- `channels.msteams.teams.<teamId>.tools`: default per-team tool policy overrides (`allow`/`deny`/`alsoAllow`) used when a channel override is missing.
+- `channels.msteams.teams.<teamId>.toolsBySender`: default per-team per-sender tool policy overrides (`"*"` wildcard supported).
 - `channels.msteams.teams.<teamId>.channels.<conversationId>.replyStyle`: per-channel override.
 - `channels.msteams.teams.<teamId>.channels.<conversationId>.requireMention`: per-channel override.
+- `channels.msteams.teams.<teamId>.channels.<conversationId>.tools`: per-channel tool policy overrides (`allow`/`deny`/`alsoAllow`).
+- `channels.msteams.teams.<teamId>.channels.<conversationId>.toolsBySender`: per-channel per-sender tool policy overrides (`"*"` wildcard supported).
+- `channels.msteams.sharePointSiteId`: SharePoint site ID for file uploads in group chats/channels (see [Sending files in group chats](#sending-files-in-group-chats)).
 
 ## Routing & Sessions
 - Session keys follow the standard agent format (see [/concepts/session](/concepts/session)):
@@ -469,15 +475,160 @@ Teams recently introduced two channel UI styles over the same underlying data mo
 - **Channels/groups:** Attachments live in M365 storage (SharePoint/OneDrive). The webhook payload only includes an HTML stub, not the actual file bytes. **Graph API permissions are required** to download channel attachments.
 
 Without Graph permissions, channel messages with images will be received as text-only (the image content is not accessible to the bot).
-By default, Clawdbot only downloads media from Microsoft/Teams hostnames. Override with `channels.msteams.mediaAllowHosts` (use `["*"]` to allow any host).
+By default, OpenClaw only downloads media from Microsoft/Teams hostnames. Override with `channels.msteams.mediaAllowHosts` (use `["*"]` to allow any host).
+
+## Sending files in group chats
+
+Bots can send files in DMs using the FileConsentCard flow (built-in). However, **sending files in group chats/channels** requires additional setup:
+
+| Context | How files are sent | Setup needed |
+|---------|-------------------|--------------|
+| **DMs** | FileConsentCard → user accepts → bot uploads | Works out of the box |
+| **Group chats/channels** | Upload to SharePoint → share link | Requires `sharePointSiteId` + Graph permissions |
+| **Images (any context)** | Base64-encoded inline | Works out of the box |
+
+### Why group chats need SharePoint
+
+Bots don't have a personal OneDrive drive (the `/me/drive` Graph API endpoint doesn't work for application identities). To send files in group chats/channels, the bot uploads to a **SharePoint site** and creates a sharing link.
+
+### Setup
+
+1. **Add Graph API permissions** in Entra ID (Azure AD) → App Registration:
+   - `Sites.ReadWrite.All` (Application) - upload files to SharePoint
+   - `Chat.Read.All` (Application) - optional, enables per-user sharing links
+
+2. **Grant admin consent** for the tenant.
+
+3. **Get your SharePoint site ID:**
+   ```bash
+   # Via Graph Explorer or curl with a valid token:
+   curl -H "Authorization: Bearer $TOKEN" \
+     "https://graph.microsoft.com/v1.0/sites/{hostname}:/{site-path}"
+
+   # Example: for a site at "contoso.sharepoint.com/sites/BotFiles"
+   curl -H "Authorization: Bearer $TOKEN" \
+     "https://graph.microsoft.com/v1.0/sites/contoso.sharepoint.com:/sites/BotFiles"
+
+   # Response includes: "id": "contoso.sharepoint.com,guid1,guid2"
+   ```
+
+4. **Configure OpenClaw:**
+   ```json5
+   {
+     channels: {
+       msteams: {
+         // ... other config ...
+         sharePointSiteId: "contoso.sharepoint.com,guid1,guid2"
+       }
+     }
+   }
+   ```
+
+### Sharing behavior
+
+| Permission | Sharing behavior |
+|------------|------------------|
+| `Sites.ReadWrite.All` only | Organization-wide sharing link (anyone in org can access) |
+| `Sites.ReadWrite.All` + `Chat.Read.All` | Per-user sharing link (only chat members can access) |
+
+Per-user sharing is more secure as only the chat participants can access the file. If `Chat.Read.All` permission is missing, the bot falls back to organization-wide sharing.
+
+### Fallback behavior
+
+| Scenario | Result |
+|----------|--------|
+| Group chat + file + `sharePointSiteId` configured | Upload to SharePoint, send sharing link |
+| Group chat + file + no `sharePointSiteId` | Attempt OneDrive upload (may fail), send text only |
+| Personal chat + file | FileConsentCard flow (works without SharePoint) |
+| Any context + image | Base64-encoded inline (works without SharePoint) |
+
+### Files stored location
+
+Uploaded files are stored in a `/OpenClawShared/` folder in the configured SharePoint site's default document library.
 
 ## Polls (Adaptive Cards)
-Clawdbot sends Teams polls as Adaptive Cards (there is no native Teams poll API).
+OpenClaw sends Teams polls as Adaptive Cards (there is no native Teams poll API).
 
-- CLI: `clawdbot message poll --channel msteams --target conversation:<id> ...`
-- Votes are recorded by the gateway in `~/.clawdbot/msteams-polls.json`.
+- CLI: `openclaw message poll --channel msteams --target conversation:<id> ...`
+- Votes are recorded by the gateway in `~/.openclaw/msteams-polls.json`.
 - The gateway must stay online to record votes.
 - Polls do not auto-post result summaries yet (inspect the store file if needed).
+
+## Adaptive Cards (arbitrary)
+Send any Adaptive Card JSON to Teams users or conversations using the `message` tool or CLI.
+
+The `card` parameter accepts an Adaptive Card JSON object. When `card` is provided, the message text is optional.
+
+**Agent tool:**
+```json
+{
+  "action": "send",
+  "channel": "msteams",
+  "target": "user:<id>",
+  "card": {
+    "type": "AdaptiveCard",
+    "version": "1.5",
+    "body": [{"type": "TextBlock", "text": "Hello!"}]
+  }
+}
+```
+
+**CLI:**
+```bash
+openclaw message send --channel msteams \
+  --target "conversation:19:abc...@thread.tacv2" \
+  --card '{"type":"AdaptiveCard","version":"1.5","body":[{"type":"TextBlock","text":"Hello!"}]}'
+```
+
+See [Adaptive Cards documentation](https://adaptivecards.io/) for card schema and examples. For target format details, see [Target formats](#target-formats) below.
+
+## Target formats
+
+MSTeams targets use prefixes to distinguish between users and conversations:
+
+| Target type | Format | Example |
+|-------------|--------|---------|
+| User (by ID) | `user:<aad-object-id>` | `user:40a1a0ed-4ff2-4164-a219-55518990c197` |
+| User (by name) | `user:<display-name>` | `user:John Smith` (requires Graph API) |
+| Group/channel | `conversation:<conversation-id>` | `conversation:19:abc123...@thread.tacv2` |
+| Group/channel (raw) | `<conversation-id>` | `19:abc123...@thread.tacv2` (if contains `@thread`) |
+
+**CLI examples:**
+```bash
+# Send to a user by ID
+openclaw message send --channel msteams --target "user:40a1a0ed-..." --message "Hello"
+
+# Send to a user by display name (triggers Graph API lookup)
+openclaw message send --channel msteams --target "user:John Smith" --message "Hello"
+
+# Send to a group chat or channel
+openclaw message send --channel msteams --target "conversation:19:abc...@thread.tacv2" --message "Hello"
+
+# Send an Adaptive Card to a conversation
+openclaw message send --channel msteams --target "conversation:19:abc...@thread.tacv2" \
+  --card '{"type":"AdaptiveCard","version":"1.5","body":[{"type":"TextBlock","text":"Hello"}]}'
+```
+
+**Agent tool examples:**
+```json
+{
+  "action": "send",
+  "channel": "msteams",
+  "target": "user:John Smith",
+  "message": "Hello!"
+}
+```
+
+```json
+{
+  "action": "send",
+  "channel": "msteams",
+  "target": "conversation:19:abc...@thread.tacv2",
+  "card": {"type": "AdaptiveCard", "version": "1.5", "body": [{"type": "TextBlock", "text": "Hello"}]}
+}
+```
+
+Note: Without the `user:` prefix, names default to group/team resolution. Always use `user:` when targeting people by display name.
 
 ## Proactive messaging
 - Proactive messages are only possible **after** a user has interacted, because we store conversation references at that point.

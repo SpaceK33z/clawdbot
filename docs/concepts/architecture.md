@@ -5,7 +5,7 @@ read_when:
 ---
 # Gateway architecture
 
-Last updated: 2026-01-19
+Last updated: 2026-01-22
 
 ## Overview
 
@@ -34,7 +34,8 @@ Last updated: 2026-01-19
 
 ### Nodes (macOS / iOS / Android / headless)
 - Connect to the **same WS server** with `role: node`.
-- Pair with the Gateway to receive a token.
+- Provide a device identity in `connect`; pairing is **device‑based** (role `node`) and
+  approval lives in the device pairing store.
 - Expose commands like `canvas.*`, `camera.*`, `screen.record`, `location.get`.
 
 Protocol details:
@@ -71,7 +72,7 @@ Client                    Gateway
 - After handshake:
   - Requests: `{type:"req", id, method, params}` → `{type:"res", id, ok, payload|error}`
   - Events: `{type:"event", event, payload, seq?, stateVersion?}`
-- If `CLAWDBOT_GATEWAY_TOKEN` (or `--token`) is set, `connect.params.auth.token`
+- If `OPENCLAW_GATEWAY_TOKEN` (or `--token`) is set, `connect.params.auth.token`
   must match or the socket closes.
 - Idempotency keys are required for side‑effecting methods (`send`, `agent`) to
   safely retry; the server keeps a short‑lived dedupe cache.
@@ -110,7 +111,7 @@ Details: [Gateway protocol](/gateway/protocol), [Pairing](/start/pairing),
 
 ## Operations snapshot
 
-- Start: `clawdbot gateway` (foreground, logs to stdout).
+- Start: `openclaw gateway` (foreground, logs to stdout).
 - Health: `health` over WS (also included in `hello-ok`).
 - Supervision: launchd/systemd for auto‑restart.
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import process from "node:process";
+import type { GatewayLockHandle } from "../infra/gateway-lock.js";
 
-declare const __CLAWDBOT_VERSION__: string;
+declare const __OPENCLAW_VERSION__: string | undefined;
 
 const BUNDLED_VERSION =
-  (typeof __CLAWDBOT_VERSION__ === "string" && __CLAWDBOT_VERSION__) ||
-  process.env.CLAWDBOT_BUNDLED_VERSION ||
+  (typeof __OPENCLAW_VERSION__ === "string" && __OPENCLAW_VERSION__) ||
+  process.env.OPENCLAW_BUNDLED_VERSION ||
   "0.0.0";
 
 function argValue(args: string[], flag: string): string | undefined {
@@ -25,7 +26,7 @@ type GatewayWsLogStyle = "auto" | "full" | "compact";
 
 async function main() {
   if (hasFlag(args, "--version") || hasFlag(args, "-v")) {
-    // Match `clawdbot --version` behavior for Swift env/version checks.
+    // Match `openclaw --version` behavior for Swift env/version checks.
     // Keep output a single line.
     console.log(BUNDLED_VERSION);
     process.exit(0);
@@ -45,6 +46,7 @@ async function main() {
     { startGatewayServer },
     { setGatewayWsLogStyle },
     { setVerbose },
+    { acquireGatewayLock, GatewayLockError },
     { consumeGatewaySigusr1RestartAuthorization, isGatewaySigusr1RestartExternallyAllowed },
     { defaultRuntime },
     { enableConsoleCapture, setConsoleTimestampPrefix },
@@ -53,10 +55,11 @@ async function main() {
     import("../gateway/server.js"),
     import("../gateway/ws-logging.js"),
     import("../globals.js"),
+    import("../infra/gateway-lock.js"),
     import("../infra/restart.js"),
     import("../runtime.js"),
     import("../logging.js"),
-  ]);
+  ] as const);
 
   enableConsoleCapture();
   setConsoleTimestampPrefix(true);
@@ -72,6 +75,7 @@ async function main() {
   const cfg = loadConfig();
   const portRaw =
     argValue(args, "--port") ??
+    process.env.OPENCLAW_GATEWAY_PORT ??
     process.env.CLAWDBOT_GATEWAY_PORT ??
     (typeof cfg.gateway?.port === "number" ? String(cfg.gateway.port) : "") ??
     "18789";
@@ -83,6 +87,7 @@ async function main() {
 
   const bindRaw =
     argValue(args, "--bind") ??
+    process.env.OPENCLAW_GATEWAY_BIND ??
     process.env.CLAWDBOT_GATEWAY_BIND ??
     cfg.gateway?.bind ??
     "loopback";
@@ -100,9 +105,12 @@ async function main() {
   }
 
   const token = argValue(args, "--token");
-  if (token) process.env.CLAWDBOT_GATEWAY_TOKEN = token;
+  if (token) {
+    process.env.OPENCLAW_GATEWAY_TOKEN = token;
+  }
 
   let server: Awaited<ReturnType<typeof startGatewayServer>> | null = null;
+  let lock: GatewayLockHandle | null = null;
   let shuttingDown = false;
   let forceExitTimer: ReturnType<typeof setTimeout> | null = null;
   let restartResolver: (() => void) | null = null;
@@ -177,6 +185,15 @@ async function main() {
   process.on("SIGUSR1", onSigusr1);
 
   try {
+    try {
+      lock = await acquireGatewayLock();
+    } catch (err) {
+      if (err instanceof GatewayLockError) {
+        defaultRuntime.error(`Gateway start blocked: ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
@@ -191,13 +208,14 @@ async function main() {
       });
     }
   } finally {
+    await (lock as GatewayLockHandle | null)?.release();
     cleanupSignals();
   }
 }
 
 void main().catch((err) => {
   console.error(
-    "[clawdbot] Gateway daemon failed:",
+    "[openclaw] Gateway daemon failed:",
     err instanceof Error ? (err.stack ?? err.message) : err,
   );
   process.exit(1);

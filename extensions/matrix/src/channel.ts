@@ -8,11 +8,11 @@ import {
   PAIRING_APPROVED_MESSAGE,
   setAccountEnabledInConfigSection,
   type ChannelPlugin,
-} from "clawdbot/plugin-sdk";
+} from "openclaw/plugin-sdk";
 
 import { matrixMessageActions } from "./actions.js";
 import { MatrixConfigSchema } from "./config-schema.js";
-import { resolveMatrixGroupRequireMention } from "./group-mentions.js";
+import { resolveMatrixGroupRequireMention, resolveMatrixGroupToolPolicy } from "./group-mentions.js";
 import type { CoreConfig } from "./types.js";
 import {
   listMatrixAccountIds,
@@ -167,6 +167,7 @@ export const matrixPlugin: ChannelPlugin<ResolvedMatrixAccount> = {
   },
   groups: {
     resolveRequireMention: resolveMatrixGroupRequireMention,
+    resolveToolPolicy: resolveMatrixGroupToolPolicy,
   },
   threading: {
     resolveReplyToMode: ({ cfg }) =>

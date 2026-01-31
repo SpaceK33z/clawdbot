@@ -14,6 +14,8 @@ import {
   startNodesPolling,
   stopLogsPolling,
   stopNodesPolling,
+  startDebugPolling,
+  stopDebugPolling,
 } from "./app-polling";
 
 type LifecycleHost = {
@@ -33,6 +35,9 @@ type LifecycleHost = {
 
 export function handleConnected(host: LifecycleHost) {
   host.basePath = inferBasePath();
+  applySettingsFromUrl(
+    host as unknown as Parameters<typeof applySettingsFromUrl>[0],
+  );
   syncTabWithLocation(
     host as unknown as Parameters<typeof syncTabWithLocation>[0],
     true,
@@ -44,13 +49,13 @@ export function handleConnected(host: LifecycleHost) {
     host as unknown as Parameters<typeof attachThemeListener>[0],
   );
   window.addEventListener("popstate", host.popStateHandler);
-  applySettingsFromUrl(
-    host as unknown as Parameters<typeof applySettingsFromUrl>[0],
-  );
   connectGateway(host as unknown as Parameters<typeof connectGateway>[0]);
   startNodesPolling(host as unknown as Parameters<typeof startNodesPolling>[0]);
   if (host.tab === "logs") {
     startLogsPolling(host as unknown as Parameters<typeof startLogsPolling>[0]);
+  }
+  if (host.tab === "debug") {
+    startDebugPolling(host as unknown as Parameters<typeof startDebugPolling>[0]);
   }
 }
 
@@ -62,6 +67,7 @@ export function handleDisconnected(host: LifecycleHost) {
   window.removeEventListener("popstate", host.popStateHandler);
   stopNodesPolling(host as unknown as Parameters<typeof stopNodesPolling>[0]);
   stopLogsPolling(host as unknown as Parameters<typeof stopLogsPolling>[0]);
+  stopDebugPolling(host as unknown as Parameters<typeof stopDebugPolling>[0]);
   detachThemeListener(
     host as unknown as Parameters<typeof detachThemeListener>[0],
   );

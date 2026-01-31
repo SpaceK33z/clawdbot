@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway";
 import type { AppViewState } from "./app-view-state";
+import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import {
   TAB_GROUPS,
   iconForTab,
@@ -10,6 +11,7 @@ import {
   titleForTab,
   type Tab,
 } from "./navigation";
+import { icons } from "./icons";
 import type { UiSettings } from "./storage";
 import type { ThemeMode } from "./theme";
 import type { ThemeTransitionContext } from "./theme-transition";
@@ -28,6 +30,7 @@ import type {
   StatusSummary,
 } from "./types";
 import type { ChatQueueItem, CronFormState } from "./ui-types";
+import { refreshChatAvatar } from "./app-chat";
 import { renderChat } from "./views/chat";
 import { renderConfig } from "./views/config";
 import { renderChannels } from "./views/channels";
@@ -39,6 +42,7 @@ import { renderNodes } from "./views/nodes";
 import { renderOverview } from "./views/overview";
 import { renderSessions } from "./views/sessions";
 import { renderExecApprovalPrompt } from "./views/exec-approval";
+import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation";
 import {
   approveDevicePairing,
   loadDevices,
@@ -79,16 +83,37 @@ import { loadCronRuns, toggleCronJob, runCronJob, removeCronJob, addCronJob } fr
 import { loadDebug, callDebugMethod } from "./controllers/debug";
 import { loadLogs } from "./controllers/logs";
 
+const AVATAR_DATA_RE = /^data:/i;
+const AVATAR_HTTP_RE = /^https?:\/\//i;
+
+function resolveAssistantAvatarUrl(state: AppViewState): string | undefined {
+  const list = state.agentsList?.agents ?? [];
+  const parsed = parseAgentSessionKey(state.sessionKey);
+  const agentId =
+    parsed?.agentId ??
+    state.agentsList?.defaultId ??
+    "main";
+  const agent = list.find((entry) => entry.id === agentId);
+  const identity = agent?.identity;
+  const candidate = identity?.avatarUrl ?? identity?.avatar;
+  if (!candidate) return undefined;
+  if (AVATAR_DATA_RE.test(candidate) || AVATAR_HTTP_RE.test(candidate)) return candidate;
+  return identity?.avatarUrl;
+}
+
 export function renderApp(state: AppViewState) {
   const presenceCount = state.presenceEntries.length;
   const sessionsCount = state.sessionsResult?.count ?? null;
   const cronNext = state.cronStatus?.nextWakeAtMs ?? null;
   const chatDisabledReason = state.connected ? null : "Disconnected from gateway.";
   const isChat = state.tab === "chat";
-  const chatFocus = isChat && state.settings.chatFocusMode;
+  const chatFocus = isChat && (state.settings.chatFocusMode || state.onboarding);
+  const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
+  const assistantAvatarUrl = resolveAssistantAvatarUrl(state);
+  const chatAvatarUrl = state.chatAvatarUrl ?? assistantAvatarUrl ?? null;
 
   return html`
-    <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""}">
+    <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""} ${state.onboarding ? "shell--onboarding" : ""}">
       <header class="topbar">
         <div class="topbar-left">
           <button
@@ -101,11 +126,16 @@ export function renderApp(state: AppViewState) {
             title="${state.settings.navCollapsed ? "Expand sidebar" : "Collapse sidebar"}"
             aria-label="${state.settings.navCollapsed ? "Expand sidebar" : "Collapse sidebar"}"
           >
-            <span class="nav-collapse-toggle__icon">☰</span>
+            <span class="nav-collapse-toggle__icon">${icons.menu}</span>
           </button>
           <div class="brand">
-            <div class="brand-title">CLAWDBOT</div>
-            <div class="brand-sub">Gateway Dashboard</div>
+            <div class="brand-logo">
+              <img src="https://mintcdn.com/clawhub/4rYvG-uuZrMK_URE/assets/pixel-lobster.svg?fit=max&auto=format&n=4rYvG-uuZrMK_URE&q=85&s=da2032e9eac3b5d9bfe7eb96ca6a8a26" alt="OpenClaw" />
+            </div>
+            <div class="brand-text">
+              <div class="brand-title">OPENCLAW</div>
+              <div class="brand-sub">Gateway Dashboard</div>
+            </div>
           </div>
         </div>
         <div class="topbar-status">
@@ -151,12 +181,12 @@ export function renderApp(state: AppViewState) {
           <div class="nav-group__items">
             <a
               class="nav-item nav-item--external"
-              href="https://docs.clawd.bot"
+              href="https://docs.openclaw.ai"
               target="_blank"
               rel="noreferrer"
               title="Docs (opens in new tab)"
             >
-              <span class="nav-item__icon" aria-hidden="true">📚</span>
+              <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
               <span class="nav-item__text">Docs</span>
             </a>
           </div>
@@ -199,6 +229,7 @@ export function renderApp(state: AppViewState) {
                   sessionKey: next,
                   lastActiveSessionKey: next,
                 });
+                void state.loadAssistantIdentity();
               },
               onConnect: () => state.connect(),
               onRefresh: () => state.loadOverview(),
@@ -401,6 +432,7 @@ export function renderApp(state: AppViewState) {
               onSessionKeyChange: (next) => {
                 state.sessionKey = next;
                 state.chatMessage = "";
+                state.chatAttachments = [];
                 state.chatStream = null;
                 state.chatStreamStartedAt = null;
                 state.chatRunId = null;
@@ -412,12 +444,16 @@ export function renderApp(state: AppViewState) {
                   sessionKey: next,
                   lastActiveSessionKey: next,
                 });
+                void state.loadAssistantIdentity();
                 void loadChatHistory(state);
+                void refreshChatAvatar(state);
               },
               thinkingLevel: state.chatThinkingLevel,
-              showThinking: state.settings.chatShowThinking,
+              showThinking,
               loading: state.chatLoading,
               sending: state.chatSending,
+              compactionStatus: state.compactionStatus,
+              assistantAvatarUrl: chatAvatarUrl,
               messages: state.chatMessages,
               toolMessages: state.chatToolMessages,
               stream: state.chatStream,
@@ -429,18 +465,22 @@ export function renderApp(state: AppViewState) {
               disabledReason: chatDisabledReason,
               error: state.lastError,
               sessions: state.sessionsResult,
-              focusMode: state.settings.chatFocusMode,
+              focusMode: chatFocus,
               onRefresh: () => {
                 state.resetToolStream();
-                return loadChatHistory(state);
+                return Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
               },
-              onToggleFocusMode: () =>
+              onToggleFocusMode: () => {
+                if (state.onboarding) return;
                 state.applySettings({
                   ...state.settings,
                   chatFocusMode: !state.settings.chatFocusMode,
-                }),
+                });
+              },
               onChatScroll: (event) => state.handleChatScroll(event),
               onDraftChange: (next) => (state.chatMessage = next),
+              attachments: state.chatAttachments,
+              onAttachmentsChange: (next) => (state.chatAttachments = next),
               onSend: () => state.handleSendChat(),
               canAbort: Boolean(state.chatRunId),
               onAbort: () => void state.handleAbortChat(),
@@ -455,12 +495,15 @@ export function renderApp(state: AppViewState) {
               onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
               onCloseSidebar: () => state.handleCloseSidebar(),
               onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
+              assistantName: state.assistantName,
+              assistantAvatar: state.assistantAvatar,
             })
           : nothing}
 
         ${state.tab === "config"
           ? renderConfig({
               raw: state.configRaw,
+              originalRaw: state.configRawOriginal,
               valid: state.configValid,
               issues: state.configIssues,
               loading: state.configLoading,
@@ -477,7 +520,9 @@ export function renderApp(state: AppViewState) {
               searchQuery: state.configSearchQuery,
               activeSection: state.configActiveSection,
               activeSubsection: state.configActiveSubsection,
-              onRawChange: (next) => (state.configRaw = next),
+              onRawChange: (next) => {
+                state.configRaw = next;
+              },
               onFormModeChange: (mode) => (state.configFormMode = mode),
               onFormPatch: (path, value) => updateConfigFormValue(state, path, value),
               onSearchChange: (query) => (state.configSearchQuery = query),
@@ -534,6 +579,7 @@ export function renderApp(state: AppViewState) {
           : nothing}
       </main>
       ${renderExecApprovalPrompt(state)}
+      ${renderGatewayUrlConfirmation(state)}
     </div>
   `;
 }

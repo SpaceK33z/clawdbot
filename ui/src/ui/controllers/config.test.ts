@@ -15,6 +15,7 @@ function createState(): ConfigState {
     applySessionKey: "main",
     configLoading: false,
     configRaw: "",
+    configRawOriginal: "",
     configValid: null,
     configIssues: [],
     configSaving: false,
@@ -26,6 +27,7 @@ function createState(): ConfigState {
     configSchemaLoading: false,
     configUiHints: {},
     configForm: null,
+    configFormOriginal: null,
     configFormDirty: false,
     configFormMode: "form",
     lastError: null,
@@ -62,6 +64,37 @@ describe("applyConfigSnapshot", () => {
     });
 
     expect(state.configForm).toEqual({ gateway: { mode: "local" } });
+  });
+
+  it("sets configRawOriginal when clean for change detection", () => {
+    const state = createState();
+    applyConfigSnapshot(state, {
+      config: { gateway: { mode: "local" } },
+      valid: true,
+      issues: [],
+      raw: '{ "gateway": { "mode": "local" } }',
+    });
+
+    expect(state.configRawOriginal).toBe('{ "gateway": { "mode": "local" } }');
+    expect(state.configFormOriginal).toEqual({ gateway: { mode: "local" } });
+  });
+
+  it("preserves configRawOriginal when dirty", () => {
+    const state = createState();
+    state.configFormDirty = true;
+    state.configRawOriginal = '{ "original": true }';
+    state.configFormOriginal = { original: true };
+
+    applyConfigSnapshot(state, {
+      config: { gateway: { mode: "local" } },
+      valid: true,
+      issues: [],
+      raw: '{ "gateway": { "mode": "local" } }',
+    });
+
+    // Original values should be preserved when dirty
+    expect(state.configRawOriginal).toBe('{ "original": true }');
+    expect(state.configFormOriginal).toEqual({ original: true });
   });
 });
 
@@ -109,7 +142,7 @@ describe("applyConfig", () => {
     state.client = { request } as unknown as ConfigState["client"];
     state.applySessionKey = "agent:main:whatsapp:dm:+15555550123";
     state.configFormMode = "raw";
-    state.configRaw = "{\n  agent: { workspace: \"~/clawd\" }\n}\n";
+    state.configRaw = "{\n  agent: { workspace: \"~/openclaw\" }\n}\n";
     state.configSnapshot = {
       hash: "hash-123",
     };
@@ -117,7 +150,7 @@ describe("applyConfig", () => {
     await applyConfig(state);
 
     expect(request).toHaveBeenCalledWith("config.apply", {
-      raw: "{\n  agent: { workspace: \"~/clawd\" }\n}\n",
+      raw: "{\n  agent: { workspace: \"~/openclaw\" }\n}\n",
       baseHash: "hash-123",
       sessionKey: "agent:main:whatsapp:dm:+15555550123",
     });
