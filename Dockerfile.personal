@@ -18,7 +18,7 @@ RUN mkdir -p -m 755 /etc/apt/keyrings && \
 
 # Install additional tools
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ffmpeg git jq khard openssh-server tmux vdirsyncer khal python3-pip && \
+    apt-get install -y --no-install-recommends chromium curl ffmpeg git jq khard openssh-server tmux vdirsyncer khal python3-pip && \
     curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp && \
     curl -sL https://github.com/steipete/goplaces/releases/download/v0.2.1/goplaces_0.2.1_linux_$(dpkg --print-architecture).tar.gz | tar xz -C /usr/local/bin goplaces && \
@@ -28,6 +28,9 @@ RUN apt-get update && \
 
 # Install Python packages for skills (hn, tmdb, etc.)
 RUN pip3 install --break-system-packages httpx rich
+
+# Install agent-browser globally for headless browser automation
+RUN npm install -g agent-browser
 
 # Configure SSH
 RUN ssh-keygen -A && \
